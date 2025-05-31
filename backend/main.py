@@ -8,11 +8,11 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
 
-from database.connection import create_tables
-from auth.security import get_current_user_email
-from api.traces import router as traces_router
-from api.tests import router as tests_router
-from api.evaluations import router as evaluations_router
+from backend.database.connection import create_tables
+from backend.auth.security import get_current_user_email
+from backend.api.traces import router as traces_router
+from backend.api.tests import router as tests_router
+from backend.api.evaluations import router as evaluations_router
 
 
 @asynccontextmanager

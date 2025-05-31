@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Upload,
   Download,
@@ -50,169 +50,28 @@ interface Trace {
   };
 }
 
-// Project configuration interface
-interface ProjectConfig {
-  id: string;
-  name: string;
-  description: string;
-  domain: string; // "real-estate", "pitch-deck", "template-automation", etc.
+// Dynamic filter options discovered from actual data
+interface FilterOptions {
   tools: string[];
   scenarios: string[];
-  evaluationCriteria: string[];
+  statuses: string[];
+  dataSources: string[];
 }
 
-// Available project templates
-const projectTemplates: ProjectConfig[] = [
-  {
-    id: 'real-estate',
-    name: 'Real Estate Assistant',
-    description: 'Evaluate LLM performance for real estate applications',
-    domain: 'real-estate',
-    tools: ['Listing-Finder', 'Email-Draft', 'Market-Analysis', 'Property-Valuation'],
-    scenarios: ['Multiple-Listings', 'Offer-Submission', 'Price-Trends', 'Comparative-Analysis'],
-    evaluationCriteria: ['Accuracy', 'Completeness', 'Professional-Tone', 'Data-Quality']
-  },
-  {
-    id: 'pitch-deck',
-    name: 'Pitch Deck Automation',
-    description: 'Evaluate LLM performance for pitch deck generation and optimization',
-    domain: 'pitch-deck',
-    tools: ['Slide-Generator', 'Content-Optimizer', 'Market-Research', 'Financial-Projections', 'Executive-Summary'],
-    scenarios: ['Startup-Pitch', 'Investor-Deck', 'Product-Launch', 'Series-A', 'Demo-Day'],
-    evaluationCriteria: ['Persuasiveness', 'Clarity', 'Data-Accuracy', 'Visual-Appeal', 'Story-Flow']
-  },
-  {
-    id: 'template-automation',
-    name: 'Templatize - Content Templates',
-    description: 'Evaluate LLM performance for template creation and content automation',
-    domain: 'template-automation',
-    tools: ['Template-Creator', 'Content-Generator', 'Style-Adapter', 'Variable-Parser', 'Format-Converter'],
-    scenarios: ['Email-Templates', 'Document-Generation', 'Marketing-Copy', 'Legal-Forms', 'Product-Descriptions'],
-    evaluationCriteria: ['Template-Flexibility', 'Content-Quality', 'Style-Consistency', 'Variable-Handling', 'Format-Accuracy']
-  },
-  {
-    id: 'custom',
-    name: 'Custom Project',
-    description: 'Create your own evaluation criteria and tools',
-    domain: 'custom',
-    tools: [],
-    scenarios: [],
-    evaluationCriteria: []
-  }
-];
-
-// Sample traces for different domains
-const domainSampleTraces: Record<string, Trace[]> = {
-  'real-estate': [
-    {
-      id: 'trace-001',
-      timestamp: '5/27/2025, 10:43:26 PM',
-      tool: 'Listing-Finder',
-      scenario: 'Multiple-Listings',
-      status: 'pending',
-      modelScore: 'pass',
-      humanScore: null,
-      dataSource: 'human',
-      conversation: {
-        systemPrompt: 'You are a helpful real estate assistant. Help users find properties that match their criteria.',
-        userInput: 'Find me multiple listings in downtown area with 2+ bedrooms under $500k',
-        aiResponse: 'I found 5 listings matching your criteria in the downtown area. Here are the top options:\n\n1. 123 Main St - 2 bed, 2 bath, $485k\n2. 456 Oak Ave - 3 bed, 2 bath, $495k\n3. 789 Pine St - 2 bed, 1.5 bath, $475k\n\nWould you like more details about any of these properties?'
-      },
-      functions: [
-        {
-          name: 'search_properties',
-          parameters: { location: 'downtown', bedrooms_min: 2, price_max: 500000 },
-          result: { found: 5, properties: ['123 Main St', '456 Oak Ave', '789 Pine St'] },
-          executionTime: 145
-        }
-      ],
-      metadata: {
-        modelName: 'gpt-4-turbo',
-        latencyMs: 1847,
-        tokenCount: { input: 156, output: 203 },
-        costUsd: 0.0087,
-        temperature: 0.7,
-        maxTokens: 1000
-      }
-    }
-  ],
-  'pitch-deck': [
-    {
-      id: 'trace-002',
-      timestamp: '5/27/2025, 10:43:26 PM',
-      tool: 'Slide-Generator',
-      scenario: 'Startup-Pitch',
-      status: 'pending',
-      modelScore: 'pass',
-      humanScore: null,
-      dataSource: 'human',
-      conversation: {
-        systemPrompt: 'You are an expert pitch deck creator. Generate compelling slides for startup presentations.',
-        userInput: 'Create a problem slide for a SaaS company that automates invoice processing',
-        aiResponse: 'Here\'s your Problem slide:\n\n**The Problem**\n• Small businesses spend 40+ hours/month on manual invoice processing\n• 89% of invoices contain errors leading to payment delays\n• Staff costs for invoice management average $15,000/year per company\n• Late payments hurt cash flow and vendor relationships\n\n**The Impact**\n"We\'re drowning in paperwork instead of growing our business" - Common sentiment from 200+ SMB interviews'
-      },
-      functions: [
-        {
-          name: 'generate_slide_content',
-          parameters: { slide_type: 'problem', industry: 'SaaS', focus: 'invoice processing' },
-          result: { slide_generated: true, word_count: 85, bullet_points: 4 },
-          executionTime: 892
-        }
-      ],
-      metadata: {
-        modelName: 'gpt-4-turbo',
-        latencyMs: 2341,
-        tokenCount: { input: 234, output: 156 },
-        costUsd: 0.0124,
-        temperature: 0.8,
-        maxTokens: 800
-      }
-    }
-  ],
-  'template-automation': [
-    {
-      id: 'trace-003',
-      timestamp: '5/27/2025, 10:43:26 PM',
-      tool: 'Template-Creator',
-      scenario: 'Email-Templates',
-      status: 'pending',
-      modelScore: 'pass',
-      humanScore: null,
-      dataSource: 'human',
-      conversation: {
-        systemPrompt: 'You are a template automation expert. Create flexible, reusable templates with proper variable handling.',
-        userInput: 'Create an email template for customer onboarding that can be personalized with company name, user name, and product features',
-        aiResponse: 'Here\'s your Customer Onboarding Email Template:\n\n**Subject:** Welcome to {{company_name}}, {{user_first_name}}! Let\'s get you started\n\n**Body:**\nHi {{user_first_name}},\n\nWelcome to {{company_name}}! We\'re excited to help you get the most out of {{product_name}}.\n\nHere\'s what you can do right away:\n{{#each features}}\n• {{this.name}}: {{this.description}}\n{{/each}}\n\n**Next Steps:**\n1. Complete your profile setup\n2. {{custom_action_1}}\n3. Join our {{support_channel}} for help\n\nQuestions? Reply to this email or visit {{help_url}}.\n\nBest regards,\nThe {{company_name}} Team'
-      },
-      functions: [
-        {
-          name: 'create_template',
-          parameters: { template_type: 'email', variables: ['company_name', 'user_first_name', 'product_name'], context: 'onboarding' },
-          result: { template_created: true, variable_count: 8, personalization_fields: 3 },
-          executionTime: 567
-        }
-      ],
-      metadata: {
-        modelName: 'gpt-4-turbo',
-        latencyMs: 1234,
-        tokenCount: { input: 187, output: 298 },
-        costUsd: 0.0156,
-        temperature: 0.7,
-        maxTokens: 1200
-      }
-    }
-  ]
-};
-
-// Empty chart data - no evaluations yet
+// Empty chart data - will be populated from real evaluations
 const agreementData: { date: string; rate: number }[] = [];
-
 const acceptanceData: { date: string; rate: number }[] = [];
 
 export default function EvaluationDashboard() {
   const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
-  const [selectedProject, setSelectedProject] = useState<ProjectConfig>(projectTemplates[0]); // Use projectTemplates
-  const [filters] = useState({
+  const [traces, setTraces] = useState<Trace[]>([]);
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    tools: ['All Tools'],
+    scenarios: ['All Scenarios'],
+    statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
+    dataSources: ['All Sources', 'Human', 'Synthetic']
+  });
+  const [filters, setFilters] = useState({
     tool: 'All Tools',
     scenario: 'All Scenarios', 
     status: 'All Status',
@@ -229,16 +88,46 @@ export default function EvaluationDashboard() {
   const [isDownloading, setIsDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Get current project's traces
-  const currentTraces = domainSampleTraces[selectedProject.domain] || [];
+  // Load traces from backend API
+  const loadTraces = async () => {
+    try {
+      // This will call the actual backend API when implemented
+      const response = await fetch('/api/evaluations/traces');
+      if (response.ok) {
+        const data = await response.json();
+        setTraces(data);
+        
+        // Dynamically build filter options from actual data
+        const tools = Array.from(new Set(data.map((t: Trace) => t.tool))) as string[];
+        const scenarios = Array.from(new Set(data.map((t: Trace) => t.scenario))) as string[];
+        
+        setFilterOptions({
+          tools: ['All Tools', ...tools],
+          scenarios: ['All Scenarios', ...scenarios],
+          statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
+          dataSources: ['All Sources', 'Human', 'Synthetic']
+        });
+      }
+    } catch {
+      console.log('No backend connection - using empty state');
+      // In development without backend, show empty state
+      setTraces([]);
+    }
+  };
 
-  // Add missing properties to traces
-  const completeTraces: Trace[] = currentTraces.map(trace => ({
-    ...trace,
-    modelScore: 'pass',
-    humanScore: null,
-    dataSource: 'human'
-  }));
+  // Load data on component mount
+  useEffect(() => {
+    loadTraces();
+  }, []);
+
+  // Filter traces based on selected filters
+  const filteredTraces = traces.filter(trace => {
+    if (filters.tool !== 'All Tools' && trace.tool !== filters.tool) return false;
+    if (filters.scenario !== 'All Scenarios' && trace.scenario !== filters.scenario) return false;
+    if (filters.status !== 'All Status' && trace.status !== filters.status) return false;
+    if (filters.dataSource !== 'All Sources' && trace.dataSource !== filters.dataSource) return false;
+    return true;
+  });
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -264,44 +153,63 @@ export default function EvaluationDashboard() {
     setUploadError(null);
   };
 
+  // Process uploaded file and extract trace data
   const processUpload = async () => {
     if (!uploadFile) return;
 
     setIsUploading(true);
     setUploadProgress(0);
 
-    // Simulate upload progress
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 200);
-
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // In real implementation, this would be an API call:
-      // const formData = new FormData();
-      // formData.append('file', uploadFile);
-      // const response = await fetch('/api/upload-traces', { method: 'POST', body: formData });
-      
-      setUploadProgress(100);
-      setTimeout(() => {
+      const text = await uploadFile.text();
+      let parsedData: Trace[] = [];
+
+      // Parse different file formats
+      if (uploadFile.name.endsWith('.json')) {
+        const jsonData = JSON.parse(text);
+        // Handle both single traces and arrays of traces
+        parsedData = Array.isArray(jsonData) ? jsonData : [jsonData];
+      } else if (uploadFile.name.endsWith('.csv')) {
+        // Basic CSV parsing - in production you'd use a proper CSV parser
+        // CSV parsing would be more complex in real implementation
+        parsedData = []; // Placeholder for CSV parsing
+      }
+
+      // Validate and normalize trace data
+      const validTraces = parsedData.filter(trace => 
+        trace.id && trace.timestamp && trace.conversation
+      );
+
+      if (validTraces.length > 0) {
+        // Update traces and rebuild filter options
+        setTraces(prev => [...prev, ...validTraces]);
+        
+        // Rebuild filter options with new data
+        const allTraces = [...traces, ...validTraces];
+        const tools = Array.from(new Set(allTraces.map(t => t.tool).filter(Boolean))) as string[];
+        const scenarios = Array.from(new Set(allTraces.map(t => t.scenario).filter(Boolean))) as string[];
+        
+        setFilterOptions({
+          tools: ['All Tools', ...tools],
+          scenarios: ['All Scenarios', ...scenarios],
+          statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
+          dataSources: ['All Sources', 'Human', 'Synthetic']
+        });
+
+        setUploadProgress(100);
+        setTimeout(() => {
+          setIsUploading(false);
+          setShowUploadModal(false);
+          setUploadFile(null);
+          setUploadProgress(0);
+        }, 500);
+      } else {
+        setUploadError('No valid trace data found in file');
         setIsUploading(false);
-        setShowUploadModal(false);
-        setUploadFile(null);
-        setUploadProgress(0);
-        // Show success message or refresh data
-      }, 500);
+      }
     } catch {
-      setUploadError('Upload failed. Please try again.');
+      setUploadError('Failed to parse file. Please check format and try again.');
       setIsUploading(false);
-      clearInterval(progressInterval);
     }
   };
 
@@ -402,6 +310,41 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
     );
   };
 
+  // Simple dropdown component for filters
+  const FilterDropdown = ({ value, options, onChange }: { value: string, options: string[], onChange: (value: string) => void }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    return (
+      <div className="relative">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100 min-w-[140px] justify-between"
+        >
+          <span className="text-sm">{value}</span>
+          <ChevronDown className="w-4 h-4" />
+        </button>
+        
+        {isOpen && (
+          <div className="absolute top-full left-0 mt-1 w-full bg-white border rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+            {options.map((option) => (
+              <button
+                key={option}
+                onClick={() => {
+                  onChange(option);
+                  setIsOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm text-gray-900 first:rounded-t-lg last:rounded-b-lg"
+              >
+                {option === value && <span className="mr-2">✓</span>}
+                {option}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -436,154 +379,140 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
         </div>
       </div>
 
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="space-y-8">
-          
-          {/* Dashboard Header */}
-          <div className="flex justify-between items-center mb-8">
+        
+        {/* Dashboard Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">LLM Evaluation Dashboard</h1>
+          <p className="text-gray-600 mt-1">Three-tier evaluation system for LLM-powered products</p>
+        </div>
+        
+        {/* Filter Section */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <h3 className="text-sm font-medium text-gray-900 mb-4">Filter Records</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Tool Filter */}
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">LLM Evaluation Dashboard</h1>
-              <p className="text-gray-600 mt-1">Three-tier evaluation system for LLM-powered products</p>
+              <label className="block text-xs text-gray-600 mb-1">Tool</label>
+              <FilterDropdown
+                value={filters.tool}
+                options={filterOptions.tools}
+                onChange={(value) => setFilters({...filters, tool: value})}
+              />
             </div>
+
+            {/* Scenario Filter */}
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Scenario</label>
+              <FilterDropdown
+                value={filters.scenario}
+                options={filterOptions.scenarios}
+                onChange={(value) => setFilters({...filters, scenario: value})}
+              />
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Status</label>
+              <FilterDropdown
+                value={filters.status}
+                options={filterOptions.statuses}
+                onChange={(value) => setFilters({...filters, status: value})}
+              />
+            </div>
+
+            {/* Data Source Filter */}
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Data Source</label>
+              <FilterDropdown
+                value={filters.dataSource}
+                options={filterOptions.dataSources}
+                onChange={(value) => setFilters({...filters, dataSource: value})}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Analytics Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <SimpleChart 
+            data={agreementData} 
+            title="LLM <-> Human Agreement Rate" 
+            color="#8b5cf6" 
+          />
+          <SimpleChart 
+            data={acceptanceData} 
+            title="Human Acceptance Rate" 
+            color="#3b82f6" 
+          />
+        </div>
+
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* Left Column - Trace List */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium text-gray-900">Trace Records</h3>
             
-            {/* Project Selection */}
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <button 
-                  className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-50"
-                  onClick={() => {
-                    const currentIndex = projectTemplates.findIndex(p => p.id === selectedProject.id);
-                    const nextIndex = (currentIndex + 1) % projectTemplates.length;
-                    setSelectedProject(projectTemplates[nextIndex]);
-                  }}
-                >
-                  <Database className="w-4 h-4" />
-                  <span>{selectedProject.name}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                {/* Project dropdown would go here */}
-              </div>
-              
-              <div className="h-6 w-px bg-gray-300"></div>
-              
-              <div className="text-sm text-gray-500">
-                <div className="font-medium">{selectedProject.description}</div>
-                <div className="text-xs">Domain: {selectedProject.domain}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Filter Section */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-            <div className="flex flex-wrap gap-4">
-              {/* Tool Filter */}
-              <div className="relative">
-                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
-                  <span>{filters.tool}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                {/* Tool options from selectedProject.tools */}
-              </div>
-
-              {/* Scenario Filter */}
-              <div className="relative">
-                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
-                  <span>{filters.scenario}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                {/* Scenario options from selectedProject.scenarios */}
-              </div>
-
-              {/* Status Filter */}
-              <div className="relative">
-                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
-                  <span>{filters.status}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Data Source Filter */}
-              <div className="relative">
-                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
-                  <span>{filters.dataSource}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Analytics Charts - Now in the middle */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <SimpleChart 
-              data={agreementData} 
-              title="LLM <-> Human Agreement Rate" 
-              color="#8b5cf6" 
-            />
-            <SimpleChart 
-              data={acceptanceData} 
-              title="Human Acceptance Rate" 
-              color="#3b82f6" 
-            />
-          </div>
-
-          {/* Trace Records */}
-          <div className="space-y-3">
-            {completeTraces.length > 0 ? (
-              completeTraces.map((trace) => (
-                <div
-                  key={trace.id}
-                  className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                    selectedTrace?.id === trace.id 
-                      ? 'border-blue-500 bg-blue-50' 
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                  onClick={() => setSelectedTrace(trace)}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className="text-sm font-medium text-gray-900">
-                        {trace.id}
+            {filteredTraces.length > 0 ? (
+              <div className="space-y-3">
+                {filteredTraces.map((trace) => (
+                  <div
+                    key={trace.id}
+                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                      selectedTrace?.id === trace.id 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setSelectedTrace(trace)}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className="text-sm font-medium text-gray-900">
+                          {trace.id}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {trace.timestamp}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500">
-                        {trace.timestamp}
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                          {trace.tool}
+                        </span>
+                        <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                          {trace.scenario}
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
-                        {trace.tool}
-                      </span>
-                      <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
-                        {trace.scenario}
-                      </span>
+                    <div className="text-sm text-gray-600 line-clamp-2">
+                      {trace.conversation.userInput}
                     </div>
                   </div>
-                  <div className="text-sm text-gray-600 line-clamp-2">
-                    {trace.conversation.userInput}
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
-              <div className="p-8 text-center">
-                <div className="text-gray-500">No traces available for this project</div>
+              <div className="p-8 text-center bg-white rounded-lg border">
+                <div className="text-gray-500 mb-4">No traces available</div>
                 <button
-                  onClick={() => completeTraces.length > 0 && setSelectedTrace(completeTraces[0])}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  onClick={() => setShowUploadModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  Load Sample Data
+                  Upload Data to Get Started
                 </button>
               </div>
             )}
           </div>
 
-          {/* Records List */}
+          {/* Right Column - Trace Detail */}
           <div className="bg-white rounded-lg border">
+            {/* Records Navigation */}
             <div className="p-4 border-b">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">
-                  Record 1 of 10
+                  Record {selectedTrace ? '1' : '0'} of {filteredTraces.length}
                 </span>
                 <div className="flex items-center gap-2">
-                  <button className="text-sm text-blue-600 hover:text-blue-700">Chat</button>
                   <div className="flex items-center gap-2">
                     <button className="p-1 border rounded hover:bg-gray-50">
                       <ChevronLeft className="w-4 h-4" />
@@ -711,7 +640,7 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
 
                   {activeTab === 'functions' && (
                     <div className="space-y-4">
-                      {selectedTrace.functions.length > 0 ? (
+                      {selectedTrace.functions && selectedTrace.functions.length > 0 ? (
                         selectedTrace.functions.map((func, index) => (
                           <div key={index} className="border border-gray-200 rounded-lg p-4">
                             <div className="flex items-center gap-2 mb-3">
@@ -810,13 +739,8 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <div className="text-gray-500">Select a trace record to view details</div>
-                  <button
-                    onClick={() => setSelectedTrace(domainSampleTraces['real-estate'][0])}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    Load Sample Trace
-                  </button>
+                  <div className="text-gray-500 mb-4">Select a trace record to view details</div>
+                  <div className="text-sm text-gray-400">Choose a trace from the left panel to see the conversation, function calls, and metadata</div>
                 </div>
               )}
             </div>
