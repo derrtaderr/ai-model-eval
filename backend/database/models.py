@@ -62,7 +62,7 @@ class Trace(Base):
     system_prompt = Column(Text, nullable=True)
     user_input = Column(Text, nullable=False)
     model_output = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    trace_metadata = Column(JSON, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     token_count = Column(JSON, nullable=True)  # {"input": 123, "output": 456}
     cost_usd = Column(Float, nullable=True)
@@ -92,7 +92,7 @@ class Evaluation(Base):
     score = Column(Float, nullable=True)  # Numeric score if applicable
     label = Column(String(50), nullable=True)  # "accepted", "rejected", custom labels
     critique = Column(Text, nullable=True)  # Detailed feedback
-    metadata = Column(JSON, nullable=True)  # Additional evaluation data
+    eval_metadata = Column(JSON, nullable=True)  # Additional evaluation data
     evaluated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
