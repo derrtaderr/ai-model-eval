@@ -352,8 +352,8 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">LLM Data Review</h1>
-              <p className="text-sm text-gray-600">Review and label LLM interactions</p>
+              <h1 className="text-xl font-semibold text-gray-900">LLM Evaluation Dashboard</h1>
+              <p className="text-sm text-gray-600">Three-tier evaluation system for LLM-powered products</p>
             </div>
             <div className="flex items-center gap-3">
               {/* Upload Data Button */}
@@ -381,12 +381,6 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Dashboard Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">LLM Evaluation Dashboard</h1>
-          <p className="text-gray-600 mt-1">Three-tier evaluation system for LLM-powered products</p>
-        </div>
         
         {/* Filter Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
@@ -493,13 +487,8 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
               </div>
             ) : (
               <div className="p-8 text-center bg-white rounded-lg border">
-                <div className="text-gray-500 mb-4">No traces available</div>
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Upload Data to Get Started
-                </button>
+                <div className="text-gray-500 mb-2">No traces available</div>
+                <div className="text-sm text-gray-400">Use the &quot;Upload Data&quot; button above to get started</div>
               </div>
             )}
           </div>
