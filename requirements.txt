@@ -26,6 +26,10 @@ redis==5.0.1
 httpx==0.25.2
 aiofiles==23.2.1
 
+# Testing Framework Dependencies
+jsonschema==4.20.0
+textblob==0.17.1
+
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
