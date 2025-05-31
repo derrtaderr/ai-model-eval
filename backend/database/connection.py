@@ -4,7 +4,7 @@ Database connection configuration for the LLM Evaluation Platform.
 
 import os
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from decouple import config
 
@@ -25,7 +25,7 @@ engine = create_async_engine(
 )
 
 # Create async session factory
-AsyncSessionLocal = async_sessionmaker(
+AsyncSessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False
