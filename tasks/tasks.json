@@ -129,12 +129,40 @@
       "description": "Build modern, responsive frontend application with all evaluation interfaces",
       "details": "Develop the complete frontend application using React/Next.js with evaluation dashboard, test case management interface, experiment configuration UI, analytics displays, and responsive design following modern UX best practices.",
       "testStrategy": "",
-      "status": "in-progress",
+      "status": "done",
       "dependencies": [
         1
       ],
       "priority": "high",
-      "subtasks": []
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Build Main Evaluation Dashboard",
+          "description": "Create the main dashboard with filter dropdowns, analytics charts, and trace record listing",
+          "details": "Implement the core evaluation interface with Tool/Scenario/Status/Data Source filters, agreement rate charts, and paginated trace listing",
+          "status": "done",
+          "dependencies": [],
+          "parentTaskId": 10
+        },
+        {
+          "id": 2,
+          "title": "Create Trace Detail View with Tab Interface",
+          "description": "Build the detailed trace view with Chat, Functions, and Metadata tabs",
+          "details": "Implement three-tab interface for detailed trace inspection, showing conversation flow, function calls, and metadata",
+          "status": "done",
+          "dependencies": [],
+          "parentTaskId": 10
+        },
+        {
+          "id": 3,
+          "title": "Implement Data Management Features",
+          "description": "Add upload/download functionality for labeled data",
+          "details": "Build upload data interface and download labeled data functionality with proper file handling",
+          "status": "done",
+          "dependencies": [],
+          "parentTaskId": 10
+        }
+      ]
     },
     {
       "id": 11,
