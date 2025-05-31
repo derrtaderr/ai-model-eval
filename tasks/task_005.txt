@@ -1,0 +1,11 @@
+# Task ID: 5
+# Title: Advanced Filtering & Taxonomy System
+# Status: pending
+# Dependencies: 4
+# Priority: medium
+# Description: Implement multi-dimensional filtering and dynamic taxonomy building for trace evaluation
+# Details:
+Create sophisticated filtering system with tool/function filters, scenario filters with auto-detection using LLMs, status workflow management, data source filtering, and advanced filter combinations with saved presets and URL-based sharing.
+
+# Test Strategy:
+

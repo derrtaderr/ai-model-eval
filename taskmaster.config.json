@@ -1,0 +1,22 @@
+{
+  "project": {
+    "name": "LLM Evaluation Platform",
+    "description": "A comprehensive three-tier evaluation system for LLM-powered products",
+    "version": "1.0.0"
+  },
+  "ai": {
+    "main_model": "claude-3-5-sonnet-20241022",
+    "research_model": "perplexity-llama-3.1-sonar-large-128k-online",
+    "fallback_model": "gpt-4o"
+  },
+  "paths": {
+    "prd": "scripts/prd.txt",
+    "tasks": "tasks",
+    "output": "output"
+  },
+  "features": {
+    "auto_expand": true,
+    "research_enabled": true,
+    "file_generation": true
+  }
+} 
