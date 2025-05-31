@@ -12,6 +12,7 @@ from database.connection import create_tables
 from auth.security import get_current_user_email
 from api.traces import router as traces_router
 from api.tests import router as tests_router
+from api.evaluations import router as evaluations_router
 
 
 @asynccontextmanager
@@ -55,7 +56,8 @@ async def root():
             "LangSmith Integration", 
             "Authentication",
             "Database Management",
-            "Unit Testing Framework"
+            "Unit Testing Framework",
+            "Human Evaluation Dashboard"
         ]
     }
 
@@ -82,10 +84,10 @@ async def protected_endpoint(current_user_email: str = Depends(get_current_user_
 # Include routers
 app.include_router(traces_router, prefix="/api", tags=["Traces"])
 app.include_router(tests_router, prefix="/api", tags=["Testing"])
+app.include_router(evaluations_router, prefix="/api", tags=["Evaluations"])
 
 # Future routers (will be added as we build more features)
 # app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-# app.include_router(evaluations_router, prefix="/api", tags=["Evaluations"])
 # app.include_router(experiments_router, prefix="/api", tags=["Experiments"])
 
 

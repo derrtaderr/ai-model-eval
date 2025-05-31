@@ -50,116 +50,158 @@ interface Trace {
   };
 }
 
-interface FilterOptions {
+// Project configuration interface
+interface ProjectConfig {
+  id: string;
+  name: string;
+  description: string;
+  domain: string; // "real-estate", "pitch-deck", "template-automation", etc.
   tools: string[];
   scenarios: string[];
-  statuses: string[];
-  dataSources: string[];
+  evaluationCriteria: string[];
 }
 
-const mockTraces: Trace[] = [
+// Available project templates
+const projectTemplates: ProjectConfig[] = [
   {
-    id: 'trace-001',
-    timestamp: '5/27/2025, 10:43:26 PM',
-    tool: 'Listing-Finder',
-    scenario: 'Multiple-Listings',
-    status: 'pending',
-    modelScore: 'pass',
-    humanScore: null,
-    dataSource: 'human',
-    conversation: {
-      systemPrompt: 'You are a helpful real estate assistant. Help users find properties that match their criteria.',
-      userInput: 'Find me multiple listings in downtown area with 2+ bedrooms under $500k',
-      aiResponse: 'I found 5 listings matching your criteria in the downtown area. Here are the top options:\n\n1. 123 Main St - 2 bed, 2 bath, $485k\n2. 456 Oak Ave - 3 bed, 2 bath, $495k\n3. 789 Pine St - 2 bed, 1.5 bath, $475k\n\nWould you like more details about any of these properties?'
-    },
-    functions: [
-      {
-        name: 'search_properties',
-        parameters: { location: 'downtown', bedrooms_min: 2, price_max: 500000 },
-        result: { found: 5, properties: ['123 Main St', '456 Oak Ave', '789 Pine St'] },
-        executionTime: 145
-      },
-      {
-        name: 'format_listings',
-        parameters: { properties: ['123 Main St', '456 Oak Ave', '789 Pine St'] },
-        result: { formatted_response: 'Property listings formatted' },
-        executionTime: 23
-      }
-    ],
-    metadata: {
-      modelName: 'gpt-4-turbo',
-      latencyMs: 1847,
-      tokenCount: { input: 156, output: 203 },
-      costUsd: 0.0087,
-      temperature: 0.7,
-      maxTokens: 1000
-    }
+    id: 'real-estate',
+    name: 'Real Estate Assistant',
+    description: 'Evaluate LLM performance for real estate applications',
+    domain: 'real-estate',
+    tools: ['Listing-Finder', 'Email-Draft', 'Market-Analysis', 'Property-Valuation'],
+    scenarios: ['Multiple-Listings', 'Offer-Submission', 'Price-Trends', 'Comparative-Analysis'],
+    evaluationCriteria: ['Accuracy', 'Completeness', 'Professional-Tone', 'Data-Quality']
   },
   {
-    id: 'trace-002', 
-    timestamp: '5/27/2025, 9:15:42 PM',
-    tool: 'Email-Draft',
-    scenario: 'Offer-Submission',
-    status: 'accepted',
-    modelScore: 'pass',
-    humanScore: 'good',
-    dataSource: 'human',
-    conversation: {
-      userInput: 'Submit offer for the property at 123 Main St',
-      aiResponse: 'Offer submitted successfully',
-    },
-    functions: [],
-    metadata: {
-      modelName: 'Email-Draft',
-      latencyMs: 50,
-      tokenCount: { input: 5, output: 7 },
-      costUsd: 0.002,
-      temperature: 0.8,
-      maxTokens: 50
-    }
+    id: 'pitch-deck',
+    name: 'Pitch Deck Automation',
+    description: 'Evaluate LLM performance for pitch deck generation and optimization',
+    domain: 'pitch-deck',
+    tools: ['Slide-Generator', 'Content-Optimizer', 'Market-Research', 'Financial-Projections', 'Executive-Summary'],
+    scenarios: ['Startup-Pitch', 'Investor-Deck', 'Product-Launch', 'Series-A', 'Demo-Day'],
+    evaluationCriteria: ['Persuasiveness', 'Clarity', 'Data-Accuracy', 'Visual-Appeal', 'Story-Flow']
   },
   {
-    id: 'trace-003',
-    timestamp: '5/27/2025, 8:33:18 PM', 
-    tool: 'Market-Analysis',
-    scenario: 'Price-Trends',
-    status: 'pending',
-    modelScore: 'pass',
-    humanScore: null,
-    dataSource: 'synthetic',
-    conversation: {
-      userInput: 'What is the current price trend for properties in the city?',
-      aiResponse: 'The price trend for properties in the city is stable',
-    },
-    functions: [],
-    metadata: {
-      modelName: 'Market-Analysis',
-      latencyMs: 150,
-      tokenCount: { input: 8, output: 12 },
-      costUsd: 0.003,
-      temperature: 0.6,
-      maxTokens: 80
-    }
+    id: 'template-automation',
+    name: 'Templatize - Content Templates',
+    description: 'Evaluate LLM performance for template creation and content automation',
+    domain: 'template-automation',
+    tools: ['Template-Creator', 'Content-Generator', 'Style-Adapter', 'Variable-Parser', 'Format-Converter'],
+    scenarios: ['Email-Templates', 'Document-Generation', 'Marketing-Copy', 'Legal-Forms', 'Product-Descriptions'],
+    evaluationCriteria: ['Template-Flexibility', 'Content-Quality', 'Style-Consistency', 'Variable-Handling', 'Format-Accuracy']
+  },
+  {
+    id: 'custom',
+    name: 'Custom Project',
+    description: 'Create your own evaluation criteria and tools',
+    domain: 'custom',
+    tools: [],
+    scenarios: [],
+    evaluationCriteria: []
   }
 ];
 
-const filterOptions: FilterOptions = {
-  tools: ['All Tools', 'Listing-Finder', 'Email-Draft', 'Market-Analysis'],
-  scenarios: [
-    'All Scenarios',
-    'Multiple-Listings',
-    'Offer-Submission', 
-    'Comparative-Analysis',
-    'Pet-Friendly-Listings',
-    'Feedback-Request',
-    'Rental-Yield',
-    'Luxury-Properties',
-    'Counter-Offer',
-    'Price-Trends',
-    'Investment-Properties'
+// Sample traces for different domains
+const domainSampleTraces: Record<string, Trace[]> = {
+  'real-estate': [
+    {
+      id: 'trace-001',
+      timestamp: '5/27/2025, 10:43:26 PM',
+      tool: 'Listing-Finder',
+      scenario: 'Multiple-Listings',
+      status: 'pending',
+      modelScore: 'pass',
+      humanScore: null,
+      dataSource: 'human',
+      conversation: {
+        systemPrompt: 'You are a helpful real estate assistant. Help users find properties that match their criteria.',
+        userInput: 'Find me multiple listings in downtown area with 2+ bedrooms under $500k',
+        aiResponse: 'I found 5 listings matching your criteria in the downtown area. Here are the top options:\n\n1. 123 Main St - 2 bed, 2 bath, $485k\n2. 456 Oak Ave - 3 bed, 2 bath, $495k\n3. 789 Pine St - 2 bed, 1.5 bath, $475k\n\nWould you like more details about any of these properties?'
+      },
+      functions: [
+        {
+          name: 'search_properties',
+          parameters: { location: 'downtown', bedrooms_min: 2, price_max: 500000 },
+          result: { found: 5, properties: ['123 Main St', '456 Oak Ave', '789 Pine St'] },
+          executionTime: 145
+        }
+      ],
+      metadata: {
+        modelName: 'gpt-4-turbo',
+        latencyMs: 1847,
+        tokenCount: { input: 156, output: 203 },
+        costUsd: 0.0087,
+        temperature: 0.7,
+        maxTokens: 1000
+      }
+    }
   ],
-  statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
-  dataSources: ['All Sources', 'Human', 'Synthetic']
+  'pitch-deck': [
+    {
+      id: 'trace-002',
+      timestamp: '5/27/2025, 10:43:26 PM',
+      tool: 'Slide-Generator',
+      scenario: 'Startup-Pitch',
+      status: 'pending',
+      modelScore: 'pass',
+      humanScore: null,
+      dataSource: 'human',
+      conversation: {
+        systemPrompt: 'You are an expert pitch deck creator. Generate compelling slides for startup presentations.',
+        userInput: 'Create a problem slide for a SaaS company that automates invoice processing',
+        aiResponse: 'Here\'s your Problem slide:\n\n**The Problem**\n• Small businesses spend 40+ hours/month on manual invoice processing\n• 89% of invoices contain errors leading to payment delays\n• Staff costs for invoice management average $15,000/year per company\n• Late payments hurt cash flow and vendor relationships\n\n**The Impact**\n"We\'re drowning in paperwork instead of growing our business" - Common sentiment from 200+ SMB interviews'
+      },
+      functions: [
+        {
+          name: 'generate_slide_content',
+          parameters: { slide_type: 'problem', industry: 'SaaS', focus: 'invoice processing' },
+          result: { slide_generated: true, word_count: 85, bullet_points: 4 },
+          executionTime: 892
+        }
+      ],
+      metadata: {
+        modelName: 'gpt-4-turbo',
+        latencyMs: 2341,
+        tokenCount: { input: 234, output: 156 },
+        costUsd: 0.0124,
+        temperature: 0.8,
+        maxTokens: 800
+      }
+    }
+  ],
+  'template-automation': [
+    {
+      id: 'trace-003',
+      timestamp: '5/27/2025, 10:43:26 PM',
+      tool: 'Template-Creator',
+      scenario: 'Email-Templates',
+      status: 'pending',
+      modelScore: 'pass',
+      humanScore: null,
+      dataSource: 'human',
+      conversation: {
+        systemPrompt: 'You are a template automation expert. Create flexible, reusable templates with proper variable handling.',
+        userInput: 'Create an email template for customer onboarding that can be personalized with company name, user name, and product features',
+        aiResponse: 'Here\'s your Customer Onboarding Email Template:\n\n**Subject:** Welcome to {{company_name}}, {{user_first_name}}! Let\'s get you started\n\n**Body:**\nHi {{user_first_name}},\n\nWelcome to {{company_name}}! We\'re excited to help you get the most out of {{product_name}}.\n\nHere\'s what you can do right away:\n{{#each features}}\n• {{this.name}}: {{this.description}}\n{{/each}}\n\n**Next Steps:**\n1. Complete your profile setup\n2. {{custom_action_1}}\n3. Join our {{support_channel}} for help\n\nQuestions? Reply to this email or visit {{help_url}}.\n\nBest regards,\nThe {{company_name}} Team'
+      },
+      functions: [
+        {
+          name: 'create_template',
+          parameters: { template_type: 'email', variables: ['company_name', 'user_first_name', 'product_name'], context: 'onboarding' },
+          result: { template_created: true, variable_count: 8, personalization_fields: 3 },
+          executionTime: 567
+        }
+      ],
+      metadata: {
+        modelName: 'gpt-4-turbo',
+        latencyMs: 1234,
+        tokenCount: { input: 187, output: 298 },
+        costUsd: 0.0156,
+        temperature: 0.7,
+        maxTokens: 1200
+      }
+    }
+  ]
 };
 
 // Empty chart data - no evaluations yet
@@ -169,7 +211,8 @@ const acceptanceData: { date: string; rate: number }[] = [];
 
 export default function EvaluationDashboard() {
   const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
-  const [filters, setFilters] = useState({
+  const [selectedProject, setSelectedProject] = useState<ProjectConfig>(projectTemplates[0]); // Use projectTemplates
+  const [filters] = useState({
     tool: 'All Tools',
     scenario: 'All Scenarios', 
     status: 'All Status',
@@ -185,6 +228,17 @@ export default function EvaluationDashboard() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get current project's traces
+  const currentTraces = domainSampleTraces[selectedProject.domain] || [];
+
+  // Add missing properties to traces
+  const completeTraces: Trace[] = currentTraces.map(trace => ({
+    ...trace,
+    modelScore: 'pass',
+    humanScore: null,
+    dataSource: 'human'
+  }));
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -348,48 +402,6 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
     );
   };
 
-  const FilterDropdown = ({ 
-    value, 
-    options, 
-    onChange 
-  }: { 
-    value: string, 
-    options: string[], 
-    onChange: (value: string) => void 
-  }) => {
-    const [isOpen, setIsOpen] = useState(false);
-
-    return (
-      <div className="relative">
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 px-3 py-2 bg-white border rounded-lg hover:bg-gray-50 min-w-[140px] justify-between"
-        >
-          <span className="text-sm text-gray-900">{value}</span>
-          <ChevronDown className="w-4 h-4 text-gray-600" />
-        </button>
-        
-        {isOpen && (
-          <div className="absolute top-full left-0 mt-1 w-full bg-white border rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
-            {options.map((option) => (
-              <button
-                key={option}
-                onClick={() => {
-                  onChange(option);
-                  setIsOpen(false);
-                }}
-                className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm text-gray-900 first:rounded-t-lg last:rounded-b-lg"
-              >
-                {option === value && <span className="mr-2">✓</span>}
-                {option}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -428,46 +440,74 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
         <div className="space-y-8">
           
           {/* Dashboard Header */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Dashboard</h2>
-            <button className="text-sm text-blue-600 hover:text-blue-700">View Reports</button>
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">LLM Evaluation Dashboard</h1>
+              <p className="text-gray-600 mt-1">Three-tier evaluation system for LLM-powered products</p>
+            </div>
+            
+            {/* Project Selection */}
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <button 
+                  className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    const currentIndex = projectTemplates.findIndex(p => p.id === selectedProject.id);
+                    const nextIndex = (currentIndex + 1) % projectTemplates.length;
+                    setSelectedProject(projectTemplates[nextIndex]);
+                  }}
+                >
+                  <Database className="w-4 h-4" />
+                  <span>{selectedProject.name}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {/* Project dropdown would go here */}
+              </div>
+              
+              <div className="h-6 w-px bg-gray-300"></div>
+              
+              <div className="text-sm text-gray-500">
+                <div className="font-medium">{selectedProject.description}</div>
+                <div className="text-xs">Domain: {selectedProject.domain}</div>
+              </div>
+            </div>
           </div>
 
           {/* Filter Section */}
-          <div className="bg-white rounded-lg border p-6">
-            <h3 className="text-sm font-medium text-gray-900 mb-4">Filter Records</h3>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Tool</label>
-                <FilterDropdown
-                  value={filters.tool}
-                  options={filterOptions.tools}
-                  onChange={(value) => setFilters({...filters, tool: value})}
-                />
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+            <div className="flex flex-wrap gap-4">
+              {/* Tool Filter */}
+              <div className="relative">
+                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
+                  <span>{filters.tool}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {/* Tool options from selectedProject.tools */}
               </div>
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Scenario</label>
-                <FilterDropdown
-                  value={filters.scenario}
-                  options={filterOptions.scenarios}
-                  onChange={(value) => setFilters({...filters, scenario: value})}
-                />
+
+              {/* Scenario Filter */}
+              <div className="relative">
+                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
+                  <span>{filters.scenario}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {/* Scenario options from selectedProject.scenarios */}
               </div>
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Status</label>
-                <FilterDropdown
-                  value={filters.status}
-                  options={filterOptions.statuses}
-                  onChange={(value) => setFilters({...filters, status: value})}
-                />
+
+              {/* Status Filter */}
+              <div className="relative">
+                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
+                  <span>{filters.status}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
               </div>
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">Data Source</label>
-                <FilterDropdown
-                  value={filters.dataSource}
-                  options={filterOptions.dataSources}
-                  onChange={(value) => setFilters({...filters, dataSource: value})}
-                />
+
+              {/* Data Source Filter */}
+              <div className="relative">
+                <button className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100">
+                  <span>{filters.dataSource}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -484,6 +524,55 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
               title="Human Acceptance Rate" 
               color="#3b82f6" 
             />
+          </div>
+
+          {/* Trace Records */}
+          <div className="space-y-3">
+            {completeTraces.length > 0 ? (
+              completeTraces.map((trace) => (
+                <div
+                  key={trace.id}
+                  className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                    selectedTrace?.id === trace.id 
+                      ? 'border-blue-500 bg-blue-50' 
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                  onClick={() => setSelectedTrace(trace)}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-medium text-gray-900">
+                        {trace.id}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {trace.timestamp}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                        {trace.tool}
+                      </span>
+                      <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                        {trace.scenario}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-600 line-clamp-2">
+                    {trace.conversation.userInput}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center">
+                <div className="text-gray-500">No traces available for this project</div>
+                <button
+                  onClick={() => completeTraces.length > 0 && setSelectedTrace(completeTraces[0])}
+                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Load Sample Data
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Records List */}
@@ -723,7 +812,7 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                 <div className="text-center py-8">
                   <div className="text-gray-500">Select a trace record to view details</div>
                   <button
-                    onClick={() => setSelectedTrace(mockTraces[0])}
+                    onClick={() => setSelectedTrace(domainSampleTraces['real-estate'][0])}
                     className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                   >
                     Load Sample Trace
