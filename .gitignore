@@ -4,6 +4,13 @@
 .env.production
 .env.test
 
+# Sensitive configuration files
+.cursor/mcp.json
+mcp.json
+*.json.secret
+*.secret
+config.json
+
 # Python
 __pycache__/
 *.py[cod]
