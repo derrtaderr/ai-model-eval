@@ -15,6 +15,9 @@ from api.traces import router as traces_router
 from api.tests import router as tests_router
 from api.evaluations import router as evaluations_router
 from api.integrations import router as integrations_router
+from api.external import router as external_router
+from api.large_dataset_handler import router as large_dataset_router
+from api.experiments import router as experiments_router
 
 
 @asynccontextmanager
@@ -92,6 +95,9 @@ app.include_router(traces_router, prefix="/api", tags=["Traces"])
 app.include_router(tests_router, prefix="/api", tags=["Testing"])
 app.include_router(evaluations_router, prefix="/api", tags=["Evaluations"])
 app.include_router(integrations_router, prefix="/api/integrations", tags=["Integrations"])
+app.include_router(external_router, prefix="/api/external", tags=["External Integration API"])
+app.include_router(large_dataset_router, prefix="/api/large_dataset_handler", tags=["Large Dataset Handler"])
+app.include_router(experiments_router, prefix="/api/experiments", tags=["Experiments"])
 
 # Future routers (will be added as we build more features)
 # app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
