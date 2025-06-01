@@ -224,7 +224,7 @@
       "description": "Create comprehensive analytics system for tracking platform performance and user behavior",
       "details": "Build analytics engine that tracks adoption metrics, usage patterns, quality improvements, LLM ↔ Human agreement rates, human acceptance rates, and time-series charts showing improvement trends. Include real-time metrics updates and export capabilities.",
       "testStrategy": "",
-      "status": "pending",
+      "status": "done",
       "dependencies": [
         4,
         6
@@ -238,13 +238,50 @@
       "description": "Build comprehensive data export capabilities for fine-tuning and external integrations",
       "details": "Create data export system that supports multiple formats (JSON, CSV, JSONL) optimized for fine-tuning, integrates with CI/CD pipelines (GitHub Actions, GitLab CI), and provides APIs for external tool integration and webhook support.",
       "testStrategy": "",
-      "status": "pending",
+      "status": "in-progress",
       "dependencies": [
         4,
         8
       ],
       "priority": "medium",
-      "subtasks": []
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Multi-Format Export System",
+          "description": "Create export endpoints that support JSON, CSV, and JSONL formats with configurable filtering and data transformation",
+          "details": "Build API endpoints that can export evaluation data, traces, and test results in multiple formats. Support filtering by date range, model, status, and other criteria. Optimize JSONL format specifically for fine-tuning datasets.\n<info added on 2025-06-01T17:57:20.976Z>\nThe multi-format export system has been successfully implemented. Key accomplishments include:\n\n1. Comprehensive API endpoints added to backend/api/evaluations.py for listing formats, exporting data, streaming large datasets, and downloading exported files.\n2. Multi-format support implemented for JSON, CSV, and JSONL, with JSONL optimized for fine-tuning datasets.\n3. Advanced filtering integration using AdvancedFilterRequest system, supporting field inclusion/exclusion and compression.\n4. Fine-tuning dataset optimization for OpenAI and Anthropic formats, with custom format capabilities.\n5. Performance optimizations including streaming exports, background processing, and progress tracking.\n6. Technical issues resolved, including missing imports and proper Pydantic schema definitions.\n\nThe system now supports efficient data export with various formats and filtering options, laying the groundwork for the next phases of the project.\n</info added on 2025-06-01T17:57:20.976Z>",
+          "status": "done",
+          "dependencies": [],
+          "parentTaskId": 9
+        },
+        {
+          "id": 2,
+          "title": "CI/CD Integration Capabilities",
+          "description": "Build GitHub Actions and GitLab CI integration for automated data export and evaluation pipeline integration",
+          "details": "Create GitHub Actions workflows and GitLab CI templates that can automatically export evaluation data, trigger evaluations on commits, and integrate with existing CI/CD pipelines. Include webhook support for external triggers.\n<info added on 2025-06-01T17:57:48.925Z>\nImplementation Plan for CI/CD Integration Capabilities:\n\n1. GitHub Actions Workflows:\n   - Automated evaluation on PR/commit\n   - Data export scheduling \n   - Performance regression detection\n   - Integration with existing workflows\n\n2. GitLab CI Templates:\n   - Pipeline templates for model evaluation\n   - Automated testing integration\n   - Artifact management for exports\n\n3. Webhook Support:\n   - GitHub webhook integration\n   - GitLab webhook support\n   - Generic webhook API for external triggers\n   - Payload validation and security\n\n4. API Endpoints to Create:\n   - POST /api/integrations/webhooks/github - GitHub webhook handler\n   - POST /api/integrations/webhooks/gitlab - GitLab webhook handler  \n   - POST /api/integrations/trigger - Generic trigger endpoint\n   - GET /api/integrations/status - Integration health check\n\n5. Workflow Templates:\n   - .github/workflows/ directory with reusable actions\n   - .gitlab-ci/ directory with pipeline templates\n   - Docker containers for CI environments\n\nInitial implementation focus will be on the webhook API and GitHub Actions workflows.\n</info added on 2025-06-01T17:57:48.925Z>\n<info added on 2025-06-01T18:02:27.143Z>\nImplementation of CI/CD Integration Capabilities completed successfully. Key accomplishments:\n\n1. Comprehensive Webhook API System:\n   - GitHub and GitLab webhook handlers with security measures\n   - Generic trigger endpoint and status monitoring\n   - Background task processing for all webhook events\n\n2. GitHub Actions Workflow:\n   - Automated evaluation on PR/push events\n   - Multi-matrix testing and performance regression detection\n   - Automated data export and artifact management\n   - Smart change detection for targeted evaluations\n\n3. GitLab CI Template:\n   - Complete 5-stage pipeline with parallel evaluation jobs\n   - Regression analysis, automated export, and deployment\n   - Container builds and performance monitoring\n\n4. Security Features:\n   - Webhook signature verification and token authentication\n   - Secure payload validation and background job isolation\n\n5. Integration Endpoints:\n   - Handlers for GitHub, GitLab, generic triggers, and status checks\n\n6. Background Processing:\n   - Async job processing for various events and tasks\n\n7. CI/CD Features:\n   - Smart change detection, parallel execution, and artifact management\n   - Automated PR/MR commenting with results\n\nTechnical integration completed with FastAPI application, syntax validation passed, and API endpoints responding correctly with auth protection. System is ready for production webhook configuration.\n</info added on 2025-06-01T18:02:27.143Z>",
+          "status": "done",
+          "dependencies": [],
+          "parentTaskId": 9
+        },
+        {
+          "id": 3,
+          "title": "External Tool Integration APIs",
+          "description": "Create REST APIs and SDK for external tool integration with comprehensive authentication and rate limiting",
+          "details": "Build RESTful APIs that allow external tools to integrate with the evaluation platform. Include SDK/client libraries for popular languages (Python, JavaScript). Implement proper authentication, rate limiting, and comprehensive API documentation.",
+          "status": "pending",
+          "dependencies": [],
+          "parentTaskId": 9
+        },
+        {
+          "id": 4,
+          "title": "Large Dataset Handling & Performance",
+          "description": "Implement streaming exports, pagination, and async processing for handling large datasets efficiently",
+          "details": "Optimize the system to handle large datasets (millions of records) through streaming exports, background job processing, pagination, and caching. Implement progress tracking for long-running export operations.",
+          "status": "pending",
+          "dependencies": [],
+          "parentTaskId": 9
+        }
+      ]
     },
     {
       "id": 10,

@@ -14,6 +14,7 @@ from auth.security import get_current_user_email
 from api.traces import router as traces_router
 from api.tests import router as tests_router
 from api.evaluations import router as evaluations_router
+from api.integrations import router as integrations_router
 
 
 @asynccontextmanager
@@ -90,6 +91,7 @@ async def protected_endpoint(current_user_email: str = Depends(get_current_user_
 app.include_router(traces_router, prefix="/api", tags=["Traces"])
 app.include_router(tests_router, prefix="/api", tags=["Testing"])
 app.include_router(evaluations_router, prefix="/api", tags=["Evaluations"])
+app.include_router(integrations_router, prefix="/api/integrations", tags=["Integrations"])
 
 # Future routers (will be added as we build more features)
 # app.include_router(auth_router, prefix="/auth", tags=["Authentication"])

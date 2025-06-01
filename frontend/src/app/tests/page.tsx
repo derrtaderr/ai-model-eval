@@ -1,4 +1,5 @@
-import { TestTube, Zap, CheckCircle, XCircle, ArrowLeft, Play, Settings } from "lucide-react";
+import { TestTube, Zap, CheckCircle, XCircle, ArrowLeft, Play } from "lucide-react";
+import Link from "next/link";
 
 export default function TestsPage() {
   const assertionTypes = [
@@ -25,10 +26,10 @@ export default function TestsPage() {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center py-6">
-            <a href="/" className="flex items-center text-gray-600 hover:text-gray-900 mr-4">
+            <Link href="/" className="flex items-center text-gray-600 hover:text-gray-900 mr-4">
               <ArrowLeft className="h-5 w-5 mr-1" />
               Back
-            </a>
+            </Link>
             <TestTube className="h-8 w-8 text-blue-600 mr-3" />
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Unit Testing Framework</h1>

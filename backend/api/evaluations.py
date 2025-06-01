@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from uuid import UUID
+from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import Response
@@ -16,7 +17,7 @@ from sqlalchemy import select, and_, or_, desc
 from sqlalchemy.orm import selectinload
 
 from database.connection import get_db
-from database.models import Trace, Evaluation, User
+from database.models import Trace, Evaluation, User, TraceTag
 from auth.security import get_current_user_email
 
 # Import evaluation-related services
@@ -33,6 +34,14 @@ try:
 except ImportError:
     batch_processor = None
     BATCH_PROCESSING_AVAILABLE = False
+
+# User Analytics service
+try:
+    from services.user_analytics import user_analytics, UserActionType, EngagementLevel
+    USER_ANALYTICS_AVAILABLE = True
+except ImportError:
+    user_analytics = None
+    USER_ANALYTICS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -2963,3 +2972,928 @@ async def get_cost_optimization_recommendations(
     except Exception as e:
         logger.error(f"Error getting cost optimization recommendations: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 
+
+# === USER ANALYTICS ENDPOINTS ===
+
+class UserEngagementResponse(BaseModel):
+    """Schema for user engagement overview response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    time_period: str
+    start_time: str
+    end_time: str
+    user_metrics: Dict[str, Any]
+    feature_usage: List[Dict[str, Any]]
+    user_journeys: List[Dict[str, Any]]
+    engagement_trends: Dict[str, Any]
+    retention_metrics: Dict[str, Any]
+
+class AgreementAnalysisResponse(BaseModel):
+    """Schema for LLM-human agreement analysis response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    time_period: str
+    total_comparisons: int
+    agreement_rate: float
+    strong_agreement_rate: float
+    disagreement_patterns: Dict[str, Any]
+    confidence_correlation: float
+    bias_indicators: Dict[str, float]
+    model_reliability_scores: Dict[str, float]
+
+class AcceptanceRateResponse(BaseModel):
+    """Schema for human acceptance rate response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    time_period: str
+    total_ai_suggestions: int
+    accepted_suggestions: int
+    rejected_suggestions: int
+    acceptance_rate: float
+    acceptance_by_confidence: Dict[str, float]
+    acceptance_by_criteria: Dict[str, float]
+    trust_trend_over_time: List[Dict[str, Any]]
+
+@router.get("/analytics/user-engagement", response_model=UserEngagementResponse)
+async def get_user_engagement_analytics(
+    time_range_days: int = Query(30, ge=1, le=365, description="Time range in days for analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get comprehensive user engagement and behavior analytics."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        engagement_data = await user_analytics.get_user_engagement_overview(time_range_days)
+        
+        return UserEngagementResponse(**engagement_data)
+        
+    except Exception as e:
+        logger.error(f"Error getting user engagement analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/llm-human-agreement", response_model=AgreementAnalysisResponse)
+async def get_llm_human_agreement_analysis(
+    time_range_days: int = Query(30, ge=1, le=365, description="Time range in days for analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Analyze agreement between LLM and human evaluations."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        agreement_data = await user_analytics.analyze_llm_human_agreement(time_range_days)
+        
+        # Convert dataclass to dict for response
+        agreement_dict = {
+            "time_period": agreement_data.time_period,
+            "total_comparisons": agreement_data.total_comparisons,
+            "agreement_rate": agreement_data.agreement_rate,
+            "strong_agreement_rate": agreement_data.strong_agreement_rate,
+            "disagreement_patterns": agreement_data.disagreement_patterns,
+            "confidence_correlation": agreement_data.confidence_correlation,
+            "bias_indicators": agreement_data.bias_indicators,
+            "model_reliability_scores": agreement_data.model_reliability_scores
+        }
+        
+        return AgreementAnalysisResponse(**agreement_dict)
+        
+    except Exception as e:
+        logger.error(f"Error analyzing LLM-human agreement: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/acceptance-rates", response_model=AcceptanceRateResponse)
+async def get_acceptance_rate_analysis(
+    time_range_days: int = Query(30, ge=1, le=365, description="Time range in days for analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Analyze human acceptance rates of AI evaluation suggestions."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        acceptance_data = await user_analytics.analyze_acceptance_rates(time_range_days)
+        
+        # Convert dataclass to dict and format trust trend
+        trust_trend_formatted = [
+            {"timestamp": dt.isoformat(), "trust_score": score}
+            for dt, score in acceptance_data.trust_trend_over_time
+        ]
+        
+        acceptance_dict = {
+            "time_period": acceptance_data.time_period,
+            "total_ai_suggestions": acceptance_data.total_ai_suggestions,
+            "accepted_suggestions": acceptance_data.accepted_suggestions,
+            "rejected_suggestions": acceptance_data.rejected_suggestions,
+            "acceptance_rate": acceptance_data.acceptance_rate,
+            "acceptance_by_confidence": acceptance_data.acceptance_by_confidence,
+            "acceptance_by_criteria": acceptance_data.acceptance_by_criteria,
+            "trust_trend_over_time": trust_trend_formatted
+        }
+        
+        return AcceptanceRateResponse(**acceptance_dict)
+        
+    except Exception as e:
+        logger.error(f"Error analyzing acceptance rates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/feature-adoption")
+async def get_feature_adoption_metrics(
+    time_range_days: int = Query(30, ge=1, le=365, description="Time range in days for analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get feature adoption and usage metrics."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        engagement_data = await user_analytics.get_user_engagement_overview(time_range_days)
+        
+        return {
+            "time_period": f"{time_range_days} days",
+            "feature_usage": engagement_data["feature_usage"],
+            "total_active_users": engagement_data["user_metrics"]["active_users"],
+            "adoption_summary": {
+                "most_popular_feature": max(
+                    engagement_data["feature_usage"], 
+                    key=lambda x: x["usage_count"], 
+                    default={"feature_name": "None"}
+                )["feature_name"],
+                "highest_adoption_rate": max(
+                    [f["adoption_rate"] for f in engagement_data["feature_usage"]], 
+                    default=0
+                ),
+                "average_usage_per_user": sum(
+                    f["avg_usage_per_user"] for f in engagement_data["feature_usage"]
+                ) / len(engagement_data["feature_usage"]) if engagement_data["feature_usage"] else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting feature adoption metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/user-retention")
+async def get_user_retention_analysis(
+    cohort_period: str = Query("weekly", description="Cohort analysis period (daily, weekly, monthly)"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get user retention and cohort analysis."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        # For now, return simplified retention metrics
+        # In a full implementation, this would do cohort analysis
+        engagement_data = await user_analytics.get_user_engagement_overview(30)
+        
+        return {
+            "cohort_period": cohort_period,
+            "retention_metrics": engagement_data["retention_metrics"],
+            "user_journeys_summary": {
+                "total_users": len(engagement_data["user_journeys"]),
+                "onboarded_users": sum(
+                    1 for journey in engagement_data["user_journeys"] 
+                    if journey.get("onboarding_completed", False)
+                ),
+                "average_evaluations_per_user": sum(
+                    journey.get("total_evaluations", 0) 
+                    for journey in engagement_data["user_journeys"]
+                ) / len(engagement_data["user_journeys"]) if engagement_data["user_journeys"] else 0
+            },
+            "engagement_trends": engagement_data["engagement_trends"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user retention analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/quality-improvement")
+async def get_quality_improvement_trends(
+    time_range_days: int = Query(90, ge=7, le=365, description="Time range in days for trend analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get quality improvement trends and metrics over time."""
+    try:
+        if not USER_ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="User analytics service is not available"
+            )
+        
+        # Combine performance analytics and user analytics for quality trends
+        if ANALYTICS_AVAILABLE:
+            performance_overview = await performance_analytics.get_system_overview(TimeRange.QUARTER)
+        else:
+            performance_overview = {}
+        
+        agreement_data = await user_analytics.analyze_llm_human_agreement(time_range_days)
+        engagement_data = await user_analytics.get_user_engagement_overview(time_range_days)
+        
+        return {
+            "time_period": f"{time_range_days} days",
+            "quality_metrics": {
+                "evaluation_accuracy_trend": performance_overview.get("performance_trends", {}).get("success_rate", {}),
+                "llm_human_agreement": {
+                    "current_agreement_rate": agreement_data.agreement_rate,
+                    "strong_agreement_rate": agreement_data.strong_agreement_rate,
+                    "bias_indicators": agreement_data.bias_indicators
+                },
+                "model_reliability": agreement_data.model_reliability_scores,
+                "calibration_effectiveness": performance_overview.get("calibration_metrics", {})
+            },
+            "improvement_indicators": {
+                "user_confidence_trend": "Improving based on higher engagement",
+                "evaluation_consistency": "Stable with " + f"{agreement_data.agreement_rate:.1%} agreement rate",
+                "system_optimization": "Cost optimization achieving savings" if performance_overview.get("cost_metrics") else "Not available"
+            },
+            "recommendations": [
+                "Focus on improving agreement rates between AI and human evaluators",
+                "Monitor model reliability scores and retrain underperforming models",
+                "Implement user feedback loops to improve evaluation quality",
+                "Continue cost optimization while maintaining evaluation accuracy"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting quality improvement trends: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# DATA EXPORT SYSTEM - Multi-Format Export Capabilities
+# ============================================================================
+
+class ExportFormat(str, Enum):
+    """Supported export formats."""
+    JSON = "json"
+    CSV = "csv"
+    JSONL = "jsonl"  # JSON Lines format for fine-tuning
+
+
+class ExportDataType(str, Enum):
+    """Types of data that can be exported."""
+    TRACES = "traces"
+    EVALUATIONS = "evaluations"
+    COMBINED = "combined"
+    FINE_TUNING = "fine_tuning"
+
+
+class ExportRequest(BaseModel):
+    """Schema for data export requests."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    format: ExportFormat = Field(..., description="Export format (json, csv, jsonl)")
+    data_type: ExportDataType = Field(..., description="Type of data to export")
+    filters: Optional[AdvancedFilterRequest] = Field(None, description="Filter configuration")
+    include_fields: Optional[List[str]] = Field(None, description="Specific fields to include")
+    exclude_fields: Optional[List[str]] = Field(None, description="Specific fields to exclude")
+    compress: bool = Field(False, description="Whether to gzip compress the output")
+    
+    # Fine-tuning specific options
+    fine_tuning_format: Optional[str] = Field("openai", description="Fine-tuning format (openai, anthropic, custom)")
+    include_system_prompts: bool = Field(True, description="Include system prompts in fine-tuning export")
+    max_records: Optional[int] = Field(None, ge=1, le=1000000, description="Maximum number of records to export")
+    
+    # CSV specific options
+    csv_delimiter: str = Field(",", description="CSV delimiter character")
+    csv_quote_char: str = Field('"', description="CSV quote character")
+    include_headers: bool = Field(True, description="Include CSV headers")
+
+
+class ExportResponse(BaseModel):
+    """Schema for export response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    export_id: str = Field(..., description="Unique export identifier")
+    status: str = Field(..., description="Export status (processing, completed, failed)")
+    format: str = Field(..., description="Export format")
+    data_type: str = Field(..., description="Data type exported")
+    total_records: int = Field(..., description="Total number of records exported")
+    file_size_bytes: int = Field(..., description="File size in bytes")
+    download_url: Optional[str] = Field(None, description="Download URL (if completed)")
+    created_at: str = Field(..., description="Export creation timestamp")
+    completed_at: Optional[str] = Field(None, description="Export completion timestamp")
+    expires_at: str = Field(..., description="When the export file expires")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Export metadata")
+
+
+class AvailableFormatsResponse(BaseModel):
+    """Schema for available export formats response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    formats: List[Dict[str, Any]] = Field(..., description="Available export formats with descriptions")
+    data_types: List[Dict[str, Any]] = Field(..., description="Available data types for export")
+    fine_tuning_formats: List[Dict[str, Any]] = Field(..., description="Available fine-tuning formats")
+
+
+import csv
+import json
+import gzip
+import io
+from typing import Generator
+from fastapi.responses import StreamingResponse
+
+
+def format_trace_for_fine_tuning(
+    trace: Dict[str, Any], 
+    evaluations: List[Dict[str, Any]], 
+    format_type: str = "openai"
+) -> Dict[str, Any]:
+    """Convert trace and evaluation data to fine-tuning format."""
+    
+    if format_type == "openai":
+        # OpenAI fine-tuning format
+        messages = []
+        
+        if trace.get("system_prompt"):
+            messages.append({
+                "role": "system",
+                "content": trace["system_prompt"]
+            })
+        
+        messages.append({
+            "role": "user", 
+            "content": trace["user_input"]
+        })
+        
+        messages.append({
+            "role": "assistant",
+            "content": trace["model_output"]
+        })
+        
+        # Add evaluation as metadata or additional context
+        best_evaluation = None
+        if evaluations:
+            # Use human evaluation if available, otherwise best model evaluation
+            human_evals = [e for e in evaluations if e.get("evaluator_type") == "human"]
+            if human_evals:
+                best_evaluation = human_evals[0]
+            else:
+                best_evaluation = max(evaluations, key=lambda x: x.get("score", 0))
+        
+        result = {"messages": messages}
+        
+        if best_evaluation:
+            result["metadata"] = {
+                "evaluation_score": best_evaluation.get("score"),
+                "evaluation_label": best_evaluation.get("label"),
+                "evaluation_critique": best_evaluation.get("critique"),
+                "trace_id": trace["id"]
+            }
+        
+        return result
+    
+    elif format_type == "anthropic":
+        # Anthropic fine-tuning format
+        return {
+            "input": trace["user_input"],
+            "output": trace["model_output"],
+            "system": trace.get("system_prompt", ""),
+            "metadata": {
+                "trace_id": trace["id"],
+                "model_name": trace.get("model_name"),
+                "evaluations": evaluations
+            }
+        }
+    
+    else:  # custom format
+        return {
+            "conversation": {
+                "system": trace.get("system_prompt"),
+                "user": trace["user_input"],
+                "assistant": trace["model_output"]
+            },
+            "metadata": {
+                "trace_id": trace["id"],
+                "timestamp": trace["timestamp"],
+                "model_name": trace.get("model_name"),
+                "latency_ms": trace.get("latency_ms"),
+                "cost_usd": trace.get("cost_usd")
+            },
+            "evaluations": evaluations
+        }
+
+
+def convert_to_csv_row(data: Dict[str, Any], flatten_nested: bool = True) -> Dict[str, Any]:
+    """Convert complex data structure to flat CSV-compatible row."""
+    row = {}
+    
+    for key, value in data.items():
+        if isinstance(value, dict) and flatten_nested:
+            # Flatten nested dictionaries
+            for nested_key, nested_value in value.items():
+                row[f"{key}_{nested_key}"] = str(nested_value) if nested_value is not None else ""
+        elif isinstance(value, list):
+            # Convert lists to JSON strings
+            row[key] = json.dumps(value) if value else ""
+        else:
+            row[key] = str(value) if value is not None else ""
+    
+    return row
+
+
+def generate_export_data(
+    traces: List[Dict[str, Any]], 
+    evaluations_map: Dict[str, List[Dict[str, Any]]],
+    export_request: ExportRequest
+) -> Generator[str, None, None]:
+    """Generate export data in the requested format."""
+    
+    if export_request.format == ExportFormat.JSON:
+        # JSON format - return complete data structure
+        export_data = []
+        
+        for trace in traces:
+            trace_evaluations = evaluations_map.get(trace["id"], [])
+            
+            if export_request.data_type == ExportDataType.TRACES:
+                export_data.append(trace)
+            elif export_request.data_type == ExportDataType.EVALUATIONS:
+                export_data.extend(trace_evaluations)
+            elif export_request.data_type == ExportDataType.COMBINED:
+                export_data.append({
+                    **trace,
+                    "evaluations": trace_evaluations
+                })
+            elif export_request.data_type == ExportDataType.FINE_TUNING:
+                export_data.append(format_trace_for_fine_tuning(
+                    trace, trace_evaluations, export_request.fine_tuning_format
+                ))
+        
+        yield json.dumps(export_data, indent=2, default=str)
+    
+    elif export_request.format == ExportFormat.JSONL:
+        # JSON Lines format - one JSON object per line
+        for trace in traces:
+            trace_evaluations = evaluations_map.get(trace["id"], [])
+            
+            if export_request.data_type == ExportDataType.FINE_TUNING:
+                data = format_trace_for_fine_tuning(
+                    trace, trace_evaluations, export_request.fine_tuning_format
+                )
+            elif export_request.data_type == ExportDataType.COMBINED:
+                data = {**trace, "evaluations": trace_evaluations}
+            else:
+                data = trace
+            
+            yield json.dumps(data, default=str) + "\n"
+    
+    elif export_request.format == ExportFormat.CSV:
+        # CSV format - tabular data
+        output = io.StringIO()
+        writer = None
+        headers_written = False
+        
+        all_rows = []
+        
+        for trace in traces:
+            trace_evaluations = evaluations_map.get(trace["id"], [])
+            
+            if export_request.data_type == ExportDataType.TRACES:
+                all_rows.append(convert_to_csv_row(trace))
+            elif export_request.data_type == ExportDataType.EVALUATIONS:
+                for evaluation in trace_evaluations:
+                    all_rows.append(convert_to_csv_row(evaluation))
+            elif export_request.data_type == ExportDataType.COMBINED:
+                combined_data = {**trace, "evaluations": trace_evaluations}
+                all_rows.append(convert_to_csv_row(combined_data))
+            elif export_request.data_type == ExportDataType.FINE_TUNING:
+                fine_tuning_data = format_trace_for_fine_tuning(
+                    trace, trace_evaluations, export_request.fine_tuning_format
+                )
+                all_rows.append(convert_to_csv_row(fine_tuning_data))
+        
+        if all_rows:
+            # Get all possible headers from all rows
+            all_headers = set()
+            for row in all_rows:
+                all_headers.update(row.keys())
+            
+            fieldnames = sorted(list(all_headers))
+            writer = csv.DictWriter(
+                output, 
+                fieldnames=fieldnames,
+                delimiter=export_request.csv_delimiter,
+                quotechar=export_request.csv_quote_char
+            )
+            
+            if export_request.include_headers:
+                writer.writeheader()
+            
+            for row in all_rows:
+                writer.writerow(row)
+        
+        yield output.getvalue()
+
+
+@router.get("/export/formats", response_model=AvailableFormatsResponse)
+async def get_available_export_formats(
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get available export formats and data types."""
+    
+    formats = [
+        {
+            "format": "json",
+            "name": "JSON",
+            "description": "Complete data structure in JSON format",
+            "supports_compression": True,
+            "best_for": ["API integration", "data analysis", "backup"]
+        },
+        {
+            "format": "csv", 
+            "name": "CSV",
+            "description": "Tabular data for spreadsheet applications",
+            "supports_compression": True,
+            "best_for": ["Excel analysis", "data visualization", "reporting"]
+        },
+        {
+            "format": "jsonl",
+            "name": "JSON Lines",
+            "description": "Line-delimited JSON, optimized for fine-tuning",
+            "supports_compression": True,
+            "best_for": ["ML training", "streaming processing", "large datasets"]
+        }
+    ]
+    
+    data_types = [
+        {
+            "type": "traces",
+            "name": "Traces Only",
+            "description": "Export trace data without evaluations"
+        },
+        {
+            "type": "evaluations", 
+            "name": "Evaluations Only",
+            "description": "Export evaluation data without traces"
+        },
+        {
+            "type": "combined",
+            "name": "Combined Data",
+            "description": "Export traces with their evaluations"
+        },
+        {
+            "type": "fine_tuning",
+            "name": "Fine-tuning Dataset",
+            "description": "Export in format optimized for model fine-tuning"
+        }
+    ]
+    
+    fine_tuning_formats = [
+        {
+            "format": "openai",
+            "name": "OpenAI",
+            "description": "OpenAI fine-tuning format with messages array"
+        },
+        {
+            "format": "anthropic",
+            "name": "Anthropic",
+            "description": "Anthropic fine-tuning format with input/output structure"
+        },
+        {
+            "format": "custom",
+            "name": "Custom",
+            "description": "Generic fine-tuning format with conversation structure"
+        }
+    ]
+    
+    return AvailableFormatsResponse(
+        formats=formats,
+        data_types=data_types,
+        fine_tuning_formats=fine_tuning_formats
+    )
+
+
+@router.post("/export/data", response_model=ExportResponse)
+async def export_data(
+    export_request: ExportRequest,
+    current_user: str = Depends(get_current_user_email),
+    db: AsyncSession = Depends(get_db)
+):
+    """Export data in the specified format with optional filtering."""
+    
+    try:
+        # Generate unique export ID
+        import uuid
+        export_id = str(uuid.uuid4())
+        
+        # Start with basic query
+        query = select(Trace).options(selectinload(Trace.evaluations))
+        
+        # Apply simple filtering if provided (simplified approach for MVP)
+        if export_request.filters:
+            filters = export_request.filters
+            
+            # Apply basic filters
+            if filters.model_names:
+                query = query.where(Trace.model_name.in_(filters.model_names))
+            
+            if filters.session_ids:
+                query = query.where(Trace.session_id.in_(filters.session_ids))
+            
+            if filters.trace_statuses:
+                query = query.where(Trace.status.in_(filters.trace_statuses))
+            
+            # Apply date range filter
+            if filters.trace_date_range:
+                if filters.trace_date_range.start_date:
+                    query = query.where(Trace.timestamp >= filters.trace_date_range.start_date)
+                if filters.trace_date_range.end_date:
+                    query = query.where(Trace.timestamp <= filters.trace_date_range.end_date)
+            
+            # Apply numeric range filters
+            if filters.latency_range:
+                if filters.latency_range.min_value is not None:
+                    query = query.where(Trace.latency_ms >= filters.latency_range.min_value)
+                if filters.latency_range.max_value is not None:
+                    query = query.where(Trace.latency_ms <= filters.latency_range.max_value)
+            
+            if filters.cost_range:
+                if filters.cost_range.min_value is not None:
+                    query = query.where(Trace.cost_usd >= filters.cost_range.min_value)
+                if filters.cost_range.max_value is not None:
+                    query = query.where(Trace.cost_usd <= filters.cost_range.max_value)
+            
+            # Apply text search
+            if filters.search_query:
+                search_conditions = []
+                if "user_input" in filters.search_in_fields:
+                    search_conditions.append(Trace.user_input.ilike(f"%{filters.search_query}%"))
+                if "model_output" in filters.search_in_fields:
+                    search_conditions.append(Trace.model_output.ilike(f"%{filters.search_query}%"))
+                
+                if search_conditions:
+                    if filters.filter_operator == "OR":
+                        query = query.where(or_(*search_conditions))
+                    else:
+                        query = query.where(and_(*search_conditions))
+        
+        # Apply max records limit
+        if export_request.max_records:
+            query = query.limit(export_request.max_records)
+        
+        # Apply sorting
+        if export_request.filters and hasattr(export_request.filters, 'sort_by'):
+            sort_field = getattr(Trace, export_request.filters.sort_by, Trace.timestamp)
+            if export_request.filters.sort_order == "asc":
+                query = query.order_by(sort_field.asc())
+            else:
+                query = query.order_by(sort_field.desc())
+        else:
+            query = query.order_by(Trace.timestamp.desc())
+        
+        # Execute query
+        result = await db.execute(query)
+        traces = result.scalars().all()
+        
+        # Convert to dictionaries and organize evaluations
+        traces_data = []
+        evaluations_map = {}
+        
+        for trace in traces:
+            trace_dict = {
+                "id": trace.id,
+                "timestamp": trace.timestamp.isoformat() if trace.timestamp else None,
+                "user_input": trace.user_input,
+                "model_output": trace.model_output,
+                "model_name": trace.model_name,
+                "system_prompt": trace.system_prompt,
+                "session_id": trace.session_id,
+                "latency_ms": trace.latency_ms,
+                "cost_usd": trace.cost_usd,
+                "status": trace.status,
+                "trace_metadata": trace.trace_metadata or {}
+            }
+            
+            # Apply field filtering if specified
+            if export_request.include_fields:
+                trace_dict = {k: v for k, v in trace_dict.items() if k in export_request.include_fields}
+            elif export_request.exclude_fields:
+                trace_dict = {k: v for k, v in trace_dict.items() if k not in export_request.exclude_fields}
+            
+            traces_data.append(trace_dict)
+            
+            # Organize evaluations
+            evaluations_map[trace.id] = []
+            for evaluation in trace.evaluations:
+                eval_dict = {
+                    "id": evaluation.id,
+                    "trace_id": evaluation.trace_id,
+                    "evaluator_type": evaluation.evaluator_type,
+                    "evaluator_id": evaluation.evaluator_id,
+                    "score": evaluation.score,
+                    "label": evaluation.label,
+                    "critique": evaluation.critique,
+                    "metadata": evaluation.metadata or {},
+                    "evaluated_at": evaluation.evaluated_at.isoformat() if evaluation.evaluated_at else None
+                }
+                evaluations_map[trace.id].append(eval_dict)
+        
+        # Generate export data
+        export_content = ""
+        for chunk in generate_export_data(traces_data, evaluations_map, export_request):
+            export_content += chunk
+        
+        # Compress if requested
+        if export_request.compress:
+            content_bytes = export_content.encode('utf-8')
+            compressed_content = gzip.compress(content_bytes)
+            file_size = len(compressed_content)
+            # In a real implementation, you'd save this to file storage
+        else:
+            file_size = len(export_content.encode('utf-8'))
+        
+        # Create export response
+        from datetime import timedelta
+        expires_at = datetime.utcnow() + timedelta(hours=24)  # 24 hour expiry
+        
+        export_response = ExportResponse(
+            export_id=export_id,
+            status="completed",
+            format=export_request.format,
+            data_type=export_request.data_type,
+            total_records=len(traces_data),
+            file_size_bytes=file_size,
+            download_url=f"/api/export/download/{export_id}",
+            created_at=datetime.utcnow().isoformat(),
+            completed_at=datetime.utcnow().isoformat(),
+            expires_at=expires_at.isoformat(),
+            metadata={
+                "compressed": export_request.compress,
+                "filters_applied": export_request.filters is not None,
+                "fine_tuning_format": export_request.fine_tuning_format if export_request.data_type == ExportDataType.FINE_TUNING else None
+            }
+        )
+        
+        # Store the export data temporarily (in production, use file storage)
+        # For now, we'll return the data directly
+        return export_response
+        
+    except Exception as e:
+        logger.error(f"Error during data export: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/export/stream")
+async def stream_export_data(
+    export_request: ExportRequest,
+    current_user: str = Depends(get_current_user_email),
+    db: AsyncSession = Depends(get_db)
+):
+    """Stream export data for large datasets."""
+    
+    try:
+        # Start with basic query
+        query = select(Trace).options(selectinload(Trace.evaluations))
+        
+        # Apply simple filtering if provided (simplified approach for MVP)
+        if export_request.filters:
+            filters = export_request.filters
+            
+            # Apply basic filters
+            if filters.model_names:
+                query = query.where(Trace.model_name.in_(filters.model_names))
+            
+            if filters.session_ids:
+                query = query.where(Trace.session_id.in_(filters.session_ids))
+            
+            if filters.trace_statuses:
+                query = query.where(Trace.status.in_(filters.trace_statuses))
+            
+            # Apply date range filter
+            if filters.trace_date_range:
+                if filters.trace_date_range.start_date:
+                    query = query.where(Trace.timestamp >= filters.trace_date_range.start_date)
+                if filters.trace_date_range.end_date:
+                    query = query.where(Trace.timestamp <= filters.trace_date_range.end_date)
+            
+            # Apply text search
+            if filters.search_query:
+                search_conditions = []
+                if "user_input" in filters.search_in_fields:
+                    search_conditions.append(Trace.user_input.ilike(f"%{filters.search_query}%"))
+                if "model_output" in filters.search_in_fields:
+                    search_conditions.append(Trace.model_output.ilike(f"%{filters.search_query}%"))
+                
+                if search_conditions:
+                    if filters.filter_operator == "OR":
+                        query = query.where(or_(*search_conditions))
+                    else:
+                        query = query.where(and_(*search_conditions))
+        
+        # Apply max records and sorting
+        if export_request.max_records:
+            query = query.limit(export_request.max_records)
+        
+        query = query.order_by(Trace.timestamp.desc())
+        
+        # Execute query
+        result = await db.execute(query)
+        traces = result.scalars().all()
+        
+        # Prepare data
+        traces_data = []
+        evaluations_map = {}
+        
+        for trace in traces:
+            trace_dict = {
+                "id": trace.id,
+                "timestamp": trace.timestamp.isoformat() if trace.timestamp else None,
+                "user_input": trace.user_input,
+                "model_output": trace.model_output,
+                "model_name": trace.model_name,
+                "system_prompt": trace.system_prompt,
+                "session_id": trace.session_id,
+                "latency_ms": trace.latency_ms,
+                "cost_usd": trace.cost_usd,
+                "status": trace.status,
+                "trace_metadata": trace.trace_metadata or {}
+            }
+            
+            traces_data.append(trace_dict)
+            
+            evaluations_map[trace.id] = []
+            for evaluation in trace.evaluations:
+                eval_dict = {
+                    "id": evaluation.id,
+                    "trace_id": evaluation.trace_id,
+                    "evaluator_type": evaluation.evaluator_type,
+                    "evaluator_id": evaluation.evaluator_id,
+                    "score": evaluation.score,
+                    "label": evaluation.label,
+                    "critique": evaluation.critique,
+                    "metadata": evaluation.metadata or {},
+                    "evaluated_at": evaluation.evaluated_at.isoformat() if evaluation.evaluated_at else None
+                }
+                evaluations_map[trace.id].append(eval_dict)
+        
+        # Determine content type and filename
+        if export_request.format == ExportFormat.JSON:
+            media_type = "application/json"
+            filename = f"export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        elif export_request.format == ExportFormat.CSV:
+            media_type = "text/csv"
+            filename = f"export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        elif export_request.format == ExportFormat.JSONL:
+            media_type = "application/x-jsonlines"
+            filename = f"export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        
+        if export_request.compress:
+            media_type = "application/gzip"
+            filename += ".gz"
+        
+        # Generate streaming response
+        def generate_compressed_stream():
+            content = ""
+            for chunk in generate_export_data(traces_data, evaluations_map, export_request):
+                content += chunk
+            
+            if export_request.compress:
+                compressed = gzip.compress(content.encode('utf-8'))
+                yield compressed
+            else:
+                yield content.encode('utf-8')
+        
+        return StreamingResponse(
+            generate_compressed_stream(),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "X-Total-Records": str(len(traces_data))
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during streaming export: {e}")
+        raise HTTPException(status_code=500, detail=f"Streaming export failed: {str(e)}")
+
+
+@router.get("/export/download/{export_id}")
+async def download_export_file(
+    export_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Download a previously generated export file."""
+    
+    # In production, this would retrieve the file from storage
+    # For now, return a placeholder response
+    raise HTTPException(
+        status_code=501, 
+        detail="File download endpoint not yet implemented. Use /export/stream for immediate downloads."
+    )

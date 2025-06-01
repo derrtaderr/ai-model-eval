@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Upload,
   Download,
@@ -12,12 +12,10 @@ import {
   Clock,
   User,
   Bot,
-  Code,
-  Database,
-  Zap,
   AlertCircle,
   FileText,
-  X
+  X,
+  BarChart3
 } from 'lucide-react';
 
 interface Trace {
@@ -63,30 +61,26 @@ const agreementData: { date: string; rate: number }[] = [];
 const acceptanceData: { date: string; rate: number }[] = [];
 
 export default function EvaluationDashboard() {
-  const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
   const [traces, setTraces] = useState<Trace[]>([]);
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
-    tools: ['All Tools'],
-    scenarios: ['All Scenarios'],
-    statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
-    dataSources: ['All Sources', 'Human', 'Synthetic']
-  });
   const [filters, setFilters] = useState({
     tool: 'All Tools',
     scenario: 'All Scenarios', 
     status: 'All Status',
     dataSource: 'All Sources'
   });
-  const [activeTab, setActiveTab] = useState<'chat' | 'functions' | 'metadata'>('chat');
-  
-  // Data management state
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    tools: ['All Tools'],
+    scenarios: ['All Scenarios'],
+    statuses: ['All Status', 'pending', 'accepted', 'rejected'],
+    dataSources: ['All Sources', 'human', 'synthetic']
+  });
+  const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Mock API functions (replace with real API calls when backend is ready)
@@ -117,21 +111,15 @@ export default function EvaluationDashboard() {
     return { success: true, message: 'Operation completed' };
   };
 
-  // Load traces from backend API (currently mocked)
-  const loadTraces = async () => {
+  const loadTraces = useCallback(async () => {
     try {
-      setIsLoading(true);
-      // Use mock API for now
-      const response = await mockApiCall('/api/evaluations/traces');
-      
-      // Ensure we only set traces if we get an array
-      if (Array.isArray(response)) {
-        const data: Trace[] = response;
+      const data = await mockApiCall('/api/evaluations');
+      if (Array.isArray(data)) {
         setTraces(data);
         
-        // Dynamically build filter options from actual data
-        const tools = Array.from(new Set(data.map((t: Trace) => t.tool))) as string[];
-        const scenarios = Array.from(new Set(data.map((t: Trace) => t.scenario))) as string[];
+        // Update filter options based on loaded data
+        const tools = Array.from(new Set(data.map(trace => trace.tool)));
+        const scenarios = Array.from(new Set(data.map(trace => trace.scenario)));
         
         setFilterOptions({
           tools: ['All Tools', ...tools],
@@ -142,15 +130,13 @@ export default function EvaluationDashboard() {
       }
     } catch (error) {
       console.error('Failed to load traces:', error);
-    } finally {
-      setIsLoading(false);
     }
-  };
+  }, []);
 
   // Load data on component mount
   useEffect(() => {
     loadTraces();
-  }, []);
+  }, [loadTraces]);
 
   // Filter traces based on selected filters
   const filteredTraces = traces.filter(trace => {
@@ -214,7 +200,7 @@ export default function EvaluationDashboard() {
           }
           
           // Validate and ensure each trace has required fields
-          parsedData = parsedData.map((trace: Record<string, unknown>, index) => ({
+          parsedData = (jsonData as Record<string, unknown>[]).map((trace: Record<string, unknown>, index) => ({
             id: trace.id as string || `uploaded-${Date.now()}-${index}`,
             timestamp: trace.timestamp as string || new Date().toLocaleString(),
             tool: trace.tool as string || 'Unknown Tool',
@@ -224,16 +210,26 @@ export default function EvaluationDashboard() {
             humanScore: (trace.humanScore as 'good' | 'bad' | null) || null,
             dataSource: (trace.dataSource as 'human' | 'synthetic') || 'human',
             conversation: {
-              userInput: (trace.conversation as any)?.userInput || trace.userInput as string || 'No input provided',
-              aiResponse: (trace.conversation as any)?.aiResponse || trace.aiResponse as string || 'No response provided',
-              systemPrompt: (trace.conversation as any)?.systemPrompt || trace.systemPrompt as string || 'No system prompt'
+              userInput: (trace.conversation as Record<string, unknown>)?.userInput as string || trace.userInput as string || 'No input provided',
+              aiResponse: (trace.conversation as Record<string, unknown>)?.aiResponse as string || trace.aiResponse as string || 'No response provided',
+              systemPrompt: (trace.conversation as Record<string, unknown>)?.systemPrompt as string || trace.systemPrompt as string || 'No system prompt'
             },
-            functions: (trace.functions as any[]) || [],
-            metadata: (trace.metadata as any) || {
-              modelName: 'Unknown Model',
-              latencyMs: 0,
-              tokenCount: { input: 0, output: 0 },
-              cost: 0
+            functions: ((trace.functions as Record<string, unknown>[]) || []).map((func: Record<string, unknown>) => ({
+              name: func.name as string || 'unknown',
+              parameters: func.parameters as Record<string, unknown> || {},
+              result: func.result as Record<string, unknown> || {},
+              executionTime: func.executionTime as number || 0
+            })),
+            metadata: {
+              modelName: ((trace.metadata as Record<string, unknown>)?.modelName as string) || 'Unknown Model',
+              latencyMs: ((trace.metadata as Record<string, unknown>)?.latencyMs as number) || 0,
+              tokenCount: {
+                input: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.input as number) || 0,
+                output: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.output as number) || 0
+              },
+              costUsd: ((trace.metadata as Record<string, unknown>)?.costUsd as number) || 0,
+              temperature: ((trace.metadata as Record<string, unknown>)?.temperature as number) || 0.7,
+              maxTokens: ((trace.metadata as Record<string, unknown>)?.maxTokens as number) || 1000
             }
           }));
           
@@ -425,6 +421,15 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
               <p className="text-sm text-gray-600">Three-tier evaluation system for LLM-powered products</p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Analytics Dashboard Link */}
+              <a 
+                href="/analytics"
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-purple-700 transition-colors"
+              >
+                <BarChart3 className="w-4 h-4" />
+                Analytics Dashboard
+              </a>
+
               {/* Upload Data Button */}
               <button 
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors"
@@ -518,11 +523,7 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-gray-900">Trace Records</h3>
             
-            {isLoading ? (
-              <div className="p-8 text-center bg-white rounded-lg border">
-                <div className="text-gray-500">Loading traces...</div>
-              </div>
-            ) : filteredTraces.length > 0 ? (
+            {filteredTraces.length > 0 ? (
               <div className="space-y-3">
                 {filteredTraces.map((trace) => (
                   <div
@@ -595,10 +596,9 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                 {(['chat', 'functions', 'metadata'] as const).map((tab) => (
                   <button
                     key={tab}
-                    onClick={() => setActiveTab(tab)}
+                    onClick={() => setSelectedTrace(null)}
                     className={`px-6 py-3 text-sm font-medium border-b-2 capitalize ${
-                      activeTab === tab
-                        ? 'border-blue-500 text-blue-600'
+                      selectedTrace ? 'border-transparent text-gray-500 hover:text-gray-700'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
@@ -633,171 +633,67 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                   </div>
 
                   {/* Tab Content */}
-                  {activeTab === 'chat' && (
-                    <div className="space-y-6">
-                      {/* System Prompt */}
-                      {selectedTrace.conversation.systemPrompt && (
-                        <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
-                          <div className="flex items-center gap-2 text-sm text-yellow-800 font-medium mb-2">
-                            <AlertCircle className="w-4 h-4" />
-                            System Prompt
-                          </div>
-                          <div className="text-sm text-yellow-700">
-                            {selectedTrace.conversation.systemPrompt}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Conversation */}
-                      <div className="space-y-4">
-                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                          <div className="flex items-center gap-2 text-sm text-blue-800 font-medium mb-2">
-                            <User className="w-4 h-4" />
-                            User Input
-                          </div>
-                          <div className="text-sm text-blue-700 whitespace-pre-wrap">
-                            {selectedTrace.conversation.userInput}
-                          </div>
-                        </div>
-                        
-                        <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                          <div className="flex items-center gap-2 text-sm text-gray-800 font-medium mb-2">
-                            <Bot className="w-4 h-4" />
-                            AI Response
-                          </div>
-                          <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                            {selectedTrace.conversation.aiResponse}
-                          </div>
-                        </div>
+                  {selectedTrace.conversation.systemPrompt && (
+                    <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-yellow-800 font-medium mb-2">
+                        <AlertCircle className="w-4 h-4" />
+                        System Prompt
                       </div>
-
-                      {/* Evaluation Controls */}
-                      <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                        <h4 className="text-sm font-medium text-gray-900 mb-3">Human Evaluation</h4>
-                        <div className="flex gap-3">
-                          <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                            <CheckCircle className="w-4 h-4" />
-                            Accept
-                          </button>
-                          <button className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
-                            <XCircle className="w-4 h-4" />
-                            Reject
-                          </button>
-                          <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
-                            <Clock className="w-4 h-4" />
-                            Mark for Review
-                          </button>
-                        </div>
-                        <div className="mt-3">
-                          <label className="block text-xs text-gray-600 mb-1">Evaluation Notes (Optional)</label>
-                          <textarea 
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500"
-                            rows={2}
-                            placeholder="Add notes about your evaluation..."
-                          />
-                        </div>
+                      <div className="text-sm text-yellow-700">
+                        {selectedTrace.conversation.systemPrompt}
                       </div>
                     </div>
                   )}
 
-                  {activeTab === 'functions' && (
-                    <div className="space-y-4">
-                      {selectedTrace.functions && selectedTrace.functions.length > 0 ? (
-                        selectedTrace.functions.map((func, index) => (
-                          <div key={index} className="border border-gray-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-3">
-                              <Code className="w-4 h-4 text-blue-600" />
-                              <span className="font-medium text-gray-900">{func.name}</span>
-                              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                {func.executionTime}ms
-                              </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <h5 className="text-sm font-medium text-gray-700 mb-2">Parameters</h5>
-                                <pre className="text-xs bg-gray-50 p-2 rounded border overflow-x-auto text-gray-900">
-                                  {JSON.stringify(func.parameters, null, 2)}
-                                </pre>
-                              </div>
-                              <div>
-                                <h5 className="text-sm font-medium text-gray-700 mb-2">Result</h5>
-                                <pre className="text-xs bg-gray-50 p-2 rounded border overflow-x-auto text-gray-900">
-                                  {JSON.stringify(func.result, null, 2)}
-                                </pre>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-8 text-gray-600">
-                          <Code className="w-8 h-8 mx-auto mb-2 text-gray-600" />
-                          <div>No function calls in this trace</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {activeTab === 'metadata' && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-4">
-                          <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                            <div className="flex items-center gap-2 text-sm text-blue-800 font-medium mb-2">
-                              <Database className="w-4 h-4" />
-                              Model Information
-                            </div>
-                            <div className="space-y-2 text-sm">
-                              <div>
-                                <span className="text-gray-600">Model:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.modelName}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-600">Temperature:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.temperature}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-600">Max Tokens:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.maxTokens}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
-                            <div className="flex items-center gap-2 text-sm text-green-800 font-medium mb-2">
-                              <Zap className="w-4 h-4" />
-                              Performance Metrics
-                            </div>
-                            <div className="space-y-2 text-sm">
-                              <div>
-                                <span className="text-gray-600">Latency:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.latencyMs}ms</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-600">Input Tokens:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.tokenCount.input}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-600">Output Tokens:</span>
-                                <span className="ml-2 text-gray-900">{selectedTrace.metadata.tokenCount.output}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-600">Cost:</span>
-                                <span className="ml-2 text-gray-900">${selectedTrace.metadata.costUsd.toFixed(4)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                          <h5 className="text-sm font-medium text-gray-700 mb-3">Raw Metadata</h5>
-                          <pre className="text-xs bg-white p-3 rounded border overflow-x-auto text-gray-900">
-                            {JSON.stringify(selectedTrace.metadata, null, 2)}
-                          </pre>
-                        </div>
+                  {/* Conversation */}
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-blue-800 font-medium mb-2">
+                        <User className="w-4 h-4" />
+                        User Input
+                      </div>
+                      <div className="text-sm text-blue-700 whitespace-pre-wrap">
+                        {selectedTrace.conversation.userInput}
                       </div>
                     </div>
-                  )}
+                    
+                    <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-gray-800 font-medium mb-2">
+                        <Bot className="w-4 h-4" />
+                        AI Response
+                      </div>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {selectedTrace.conversation.aiResponse}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Evaluation Controls */}
+                  <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Human Evaluation</h4>
+                    <div className="flex gap-3">
+                      <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                        <CheckCircle className="w-4 h-4" />
+                        Accept
+                      </button>
+                      <button className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                        <XCircle className="w-4 h-4" />
+                        Reject
+                      </button>
+                      <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                        <Clock className="w-4 h-4" />
+                        Mark for Review
+                      </button>
+                    </div>
+                    <div className="mt-3">
+                      <label className="block text-xs text-gray-600 mb-1">Evaluation Notes (Optional)</label>
+                      <textarea 
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500"
+                        rows={2}
+                        placeholder="Add notes about your evaluation..."
+                      />
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-8">

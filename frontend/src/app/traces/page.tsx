@@ -1,4 +1,5 @@
 import { Database, Search, Filter, BarChart3, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 
 export default function TracesPage() {
   return (
@@ -7,10 +8,10 @@ export default function TracesPage() {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center py-6">
-            <a href="/" className="flex items-center text-gray-600 hover:text-gray-900 mr-4">
+            <Link href="/" className="flex items-center text-gray-600 hover:text-gray-900 mr-4">
               <ArrowLeft className="h-5 w-5 mr-1" />
               Back
-            </a>
+            </Link>
             <Database className="h-8 w-8 text-blue-600 mr-3" />
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Trace Logging System</h1>
@@ -66,7 +67,7 @@ export default function TracesPage() {
                 <Search className="h-8 w-8 text-orange-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Today's Traces</p>
+                <p className="text-sm font-medium text-gray-600">Today&apos;s Traces</p>
                 <p className="text-2xl font-semibold text-gray-900">89</p>
               </div>
             </div>

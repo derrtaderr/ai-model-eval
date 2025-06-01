@@ -1,0 +1,310 @@
+# GitLab CI Template for LLM Model Evaluation
+# Include this template in your .gitlab-ci.yml:
+#   include:
+#     - local: '.gitlab-ci-templates/llm-evaluation.yml'
+
+# Global configuration
+variables:
+  EVALUATION_API_URL: ${EVALUATION_API_URL:-"http://localhost:8000"}
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  DOCKER_DRIVER: overlay2
+
+# Cache configuration
+.pip_cache: &pip_cache
+  cache:
+    key: pip-cache-$CI_PROJECT_ID
+    paths:
+      - .cache/pip/
+    policy: pull-push
+
+# Base job template
+.evaluation_base:
+  stage: test
+  image: python:3.10-slim
+  <<: *pip_cache
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git curl
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - mkdir -p evaluation/outputs evaluation/reports
+  artifacts:
+    name: "evaluation-results-$CI_JOB_NAME-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - evaluation/outputs/
+      - evaluation/reports/
+    expire_in: 30 days
+    reports:
+      junit: evaluation/reports/junit.xml
+  
+# Stages
+stages:
+  - detect-changes
+  - evaluate
+  - analyze
+  - export
+  - deploy
+
+# Detect changes to trigger evaluation
+detect-changes:
+  stage: detect-changes
+  image: alpine/git:latest
+  script:
+    - |
+      # Check for changes in model-related files
+      git diff --name-only $CI_MERGE_REQUEST_DIFF_BASE_SHA...$CI_COMMIT_SHA > changed_files.txt || echo "No merge request base" > changed_files.txt
+      
+      if grep -E "(models/|prompts/|evaluation/)" changed_files.txt; then
+        echo "MODEL_CHANGES=true" >> job.env
+      else
+        echo "MODEL_CHANGES=false" >> job.env
+      fi
+      
+      if grep -E "(config/|.gitlab-ci)" changed_files.txt; then
+        echo "CONFIG_CHANGES=true" >> job.env
+      else
+        echo "CONFIG_CHANGES=false" >> job.env
+      fi
+  artifacts:
+    reports:
+      dotenv: job.env
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Safety evaluation
+evaluate-safety:
+  extends: .evaluation_base
+  stage: evaluate
+  script:
+    - |
+      python -m evaluation.runner \
+        --type safety \
+        --output-dir evaluation/outputs \
+        --report-dir evaluation/reports \
+        --run-id "gitlab-mr-${CI_MERGE_REQUEST_IID:-push}-safety-$CI_PIPELINE_ID" \
+        --webhook-url $EVALUATION_API_URL/api/integrations/webhooks/gitlab \
+        --gitlab-token $CI_JOB_TOKEN \
+        --project-id $CI_PROJECT_ID
+  rules:
+    - if: $MODEL_CHANGES == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# Performance evaluation
+evaluate-performance:
+  extends: .evaluation_base
+  stage: evaluate
+  script:
+    - |
+      python -m evaluation.runner \
+        --type performance \
+        --output-dir evaluation/outputs \
+        --report-dir evaluation/reports \
+        --run-id "gitlab-mr-${CI_MERGE_REQUEST_IID:-push}-performance-$CI_PIPELINE_ID" \
+        --webhook-url $EVALUATION_API_URL/api/integrations/webhooks/gitlab \
+        --gitlab-token $CI_JOB_TOKEN \
+        --project-id $CI_PROJECT_ID
+  rules:
+    - if: $MODEL_CHANGES == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# Accuracy evaluation
+evaluate-accuracy:
+  extends: .evaluation_base
+  stage: evaluate
+  script:
+    - |
+      python -m evaluation.runner \
+        --type accuracy \
+        --output-dir evaluation/outputs \
+        --report-dir evaluation/reports \
+        --run-id "gitlab-mr-${CI_MERGE_REQUEST_IID:-push}-accuracy-$CI_PIPELINE_ID" \
+        --webhook-url $EVALUATION_API_URL/api/integrations/webhooks/gitlab \
+        --gitlab-token $CI_JOB_TOKEN \
+        --project-id $CI_PROJECT_ID
+  rules:
+    - if: $MODEL_CHANGES == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# Regression analysis (only for merge requests)
+regression-analysis:
+  stage: analyze
+  image: python:3.10-slim
+  <<: *pip_cache
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - |
+      # Download artifacts from evaluation jobs
+      echo "Analyzing evaluation results for regression..."
+      
+      python -m evaluation.regression_checker \
+        --baseline-branch $CI_DEFAULT_BRANCH \
+        --current-results evaluation/outputs/ \
+        --threshold 0.05 \
+        --output regression-report.json \
+        --gitlab-api-url $CI_API_V4_URL \
+        --gitlab-token $CI_JOB_TOKEN \
+        --project-id $CI_PROJECT_ID \
+        --merge-request-iid $CI_MERGE_REQUEST_IID
+  needs:
+    - job: evaluate-safety
+      artifacts: true
+    - job: evaluate-performance
+      artifacts: true
+    - job: evaluate-accuracy
+      artifacts: true
+  artifacts:
+    name: "regression-analysis-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - regression-report.json
+    expire_in: 7 days
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+
+# Export evaluation data (only on main branch)
+export-evaluation-data:
+  stage: export
+  image: python:3.10-slim
+  before_script:
+    - pip install requests python-dateutil
+  script:
+    - |
+      echo "Exporting evaluation data..."
+      
+      python -m evaluation.data_exporter \
+        --api-url $EVALUATION_API_URL \
+        --api-key $EVALUATION_API_KEY \
+        --format jsonl \
+        --output-path exports/evaluation-data-$(date +%Y%m%d-%H%M%S).jsonl \
+        --time-range 24h \
+        --gitlab-context '{
+          "project_id": "'$CI_PROJECT_ID'",
+          "pipeline_id": "'$CI_PIPELINE_ID'",
+          "commit_sha": "'$CI_COMMIT_SHA'",
+          "branch": "'$CI_COMMIT_BRANCH'"
+        }'
+  artifacts:
+    name: "evaluation-exports-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - exports/
+    expire_in: 90 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Deploy results to evaluation platform
+deploy-results:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      echo "Deploying evaluation results to platform..."
+      
+      # Send pipeline completion notification
+      curl -X POST "$EVALUATION_API_URL/api/integrations/webhooks/gitlab" \
+        -H "Content-Type: application/json" \
+        -H "X-Gitlab-Token: $GITLAB_WEBHOOK_TOKEN" \
+        -H "X-Gitlab-Event: pipeline" \
+        -d '{
+          "object_kind": "pipeline",
+          "project": {
+            "id": "'$CI_PROJECT_ID'",
+            "name": "'$CI_PROJECT_NAME'",
+            "path_with_namespace": "'$CI_PROJECT_PATH'"
+          },
+          "object_attributes": {
+            "id": "'$CI_PIPELINE_ID'",
+            "status": "success",
+            "ref": "'$CI_COMMIT_REF_NAME'",
+            "sha": "'$CI_COMMIT_SHA'",
+            "web_url": "'$CI_PIPELINE_URL'"
+          },
+          "user": {
+            "name": "'$GITLAB_USER_NAME'",
+            "username": "'$GITLAB_USER_LOGIN'",
+            "email": "'$GITLAB_USER_EMAIL'"
+          }
+        }'
+  needs:
+    - job: export-evaluation-data
+      artifacts: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Manual trigger for comprehensive evaluation
+comprehensive-evaluation:
+  extends: .evaluation_base
+  stage: evaluate
+  script:
+    - |
+      echo "Running comprehensive evaluation suite..."
+      
+      python -m evaluation.runner \
+        --type comprehensive \
+        --output-dir evaluation/outputs \
+        --report-dir evaluation/reports \
+        --run-id "gitlab-comprehensive-$CI_PIPELINE_ID" \
+        --webhook-url $EVALUATION_API_URL/api/integrations/webhooks/gitlab \
+        --gitlab-token $CI_JOB_TOKEN \
+        --project-id $CI_PROJECT_ID \
+        --parallel-workers 3
+  when: manual
+  allow_failure: false
+
+# Performance monitoring job
+monitor-performance:
+  stage: analyze
+  image: python:3.10-slim
+  script:
+    - |
+      echo "Monitoring evaluation platform performance..."
+      
+      # Check API health and performance
+      python -c "
+      import requests
+      import time
+      
+      start_time = time.time()
+      response = requests.get('$EVALUATION_API_URL/health')
+      response_time = time.time() - start_time
+      
+      print(f'API Health: {response.status_code}')
+      print(f'Response Time: {response_time:.2f}s')
+      
+      if response.status_code != 200 or response_time > 5.0:
+          exit(1)
+      "
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Container builds for evaluation environments
+build-evaluation-container:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - |
+      echo "Building evaluation container..."
+      
+      docker build -t $CI_REGISTRY_IMAGE/evaluation:$CI_COMMIT_SHORT_SHA \
+        -t $CI_REGISTRY_IMAGE/evaluation:latest \
+        -f evaluation/Dockerfile .
+      
+      docker push $CI_REGISTRY_IMAGE/evaluation:$CI_COMMIT_SHORT_SHA
+      docker push $CI_REGISTRY_IMAGE/evaluation:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - evaluation/Dockerfile
+        - evaluation/requirements.txt
+        - requirements.txt 
