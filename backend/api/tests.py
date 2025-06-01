@@ -7,7 +7,7 @@ from uuid import UUID
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
@@ -49,6 +49,8 @@ class TestCaseResponse(BaseModel):
 
 class TestRunRequest(BaseModel):
     """Schema for running tests."""
+    model_config = ConfigDict(protected_namespaces=())
+    
     test_case_ids: Optional[List[str]] = Field(None, description="Specific test case IDs to run")
     trace_ids: Optional[List[str]] = Field(None, description="Trace IDs to test against")
     model_outputs: Optional[Dict[str, str]] = Field(None, description="Manual model outputs to test")

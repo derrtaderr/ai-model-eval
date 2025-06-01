@@ -9,8 +9,9 @@ import asyncio
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from decouple import config
+from sqlalchemy.sql import func
 
 from database.models import Trace, User, TraceTag
 from database.connection import AsyncSessionLocal
@@ -99,40 +100,224 @@ class TraceLogger:
         
         # Extract tags from metadata
         if trace.metadata:
-            # Tool/function tags
+            # Tool/function tags from metadata
             if "tools_used" in trace.metadata:
                 for tool in trace.metadata["tools_used"]:
                     tags_to_add.append(("tool", tool))
             
-            # Model provider tag
-            if "claude" in trace.model_name.lower():
-                tags_to_add.append(("provider", "anthropic"))
-            elif "gpt" in trace.model_name.lower():
-                tags_to_add.append(("provider", "openai"))
-            elif "gemini" in trace.model_name.lower():
-                tags_to_add.append(("provider", "google"))
+            # Function call tags
+            if "functions" in trace.metadata:
+                for func in trace.metadata["functions"]:
+                    if isinstance(func, dict) and "name" in func:
+                        tags_to_add.append(("tool", func["name"]))
             
-            # Latency categories
-            if trace.latency_ms:
-                if trace.latency_ms < 1000:
-                    tags_to_add.append(("latency", "fast"))
-                elif trace.latency_ms < 5000:
-                    tags_to_add.append(("latency", "medium"))
-                else:
-                    tags_to_add.append(("latency", "slow"))
+            # Scenario detection from metadata
+            if "scenario" in trace.metadata:
+                tags_to_add.append(("scenario", trace.metadata["scenario"]))
+            
+            # Custom tags from metadata
+            if "tags" in trace.metadata:
+                for tag in trace.metadata["tags"]:
+                    if isinstance(tag, dict):
+                        tag_type = tag.get("type", "custom")
+                        tag_value = tag.get("value")
+                        if tag_value:
+                            tags_to_add.append((tag_type, tag_value))
+                    elif isinstance(tag, str):
+                        tags_to_add.append(("custom", tag))
+        
+        # Model provider tag
+        model_lower = trace.model_name.lower()
+        if "claude" in model_lower:
+            tags_to_add.append(("provider", "anthropic"))
+        elif "gpt" in model_lower or "openai" in model_lower:
+            tags_to_add.append(("provider", "openai"))
+        elif "gemini" in model_lower:
+            tags_to_add.append(("provider", "google"))
+        elif "llama" in model_lower:
+            tags_to_add.append(("provider", "meta"))
+        elif "mistral" in model_lower:
+            tags_to_add.append(("provider", "mistral"))
+        
+        # Latency performance categories
+        if trace.latency_ms:
+            if trace.latency_ms < 1000:
+                tags_to_add.append(("performance", "fast"))
+            elif trace.latency_ms < 5000:
+                tags_to_add.append(("performance", "medium"))
+            else:
+                tags_to_add.append(("performance", "slow"))
+        
+        # Cost categories
+        if trace.cost_usd:
+            if trace.cost_usd < 0.01:
+                tags_to_add.append(("cost", "low"))
+            elif trace.cost_usd < 0.05:
+                tags_to_add.append(("cost", "medium"))
+            else:
+                tags_to_add.append(("cost", "high"))
+        
+        # Token count categories
+        if trace.token_count:
+            total_tokens = trace.token_count.get("input", 0) + trace.token_count.get("output", 0)
+            if total_tokens < 500:
+                tags_to_add.append(("length", "short"))
+            elif total_tokens < 2000:
+                tags_to_add.append(("length", "medium"))
+            else:
+                tags_to_add.append(("length", "long"))
+        
+        # Simple scenario detection based on input patterns
+        user_input_lower = trace.user_input.lower()
+        
+        # Common patterns for real estate scenarios
+        if any(word in user_input_lower for word in ["listing", "property", "house", "apartment", "real estate"]):
+            tags_to_add.append(("scenario", "property_search"))
+        elif any(word in user_input_lower for word in ["offer", "bid", "negotiate", "purchase"]):
+            tags_to_add.append(("scenario", "offer_management"))
+        elif any(word in user_input_lower for word in ["market", "price", "trend", "analysis"]):
+            tags_to_add.append(("scenario", "market_analysis"))
+        elif any(word in user_input_lower for word in ["email", "message", "contact", "communication"]):
+            tags_to_add.append(("scenario", "communication"))
+        elif any(word in user_input_lower for word in ["schedule", "appointment", "calendar", "meeting"]):
+            tags_to_add.append(("scenario", "scheduling"))
+        
+        # Tool detection from user input and output
+        combined_text = (trace.user_input + " " + trace.model_output).lower()
+        
+        if any(word in combined_text for word in ["search", "find", "lookup", "query"]):
+            tags_to_add.append(("tool", "search"))
+        elif any(word in combined_text for word in ["email", "send", "message"]):
+            tags_to_add.append(("tool", "email"))
+        elif any(word in combined_text for word in ["calendar", "schedule", "appointment"]):
+            tags_to_add.append(("tool", "calendar"))
+        elif any(word in combined_text for word in ["calculate", "computation", "math"]):
+            tags_to_add.append(("tool", "calculator"))
         
         # Create tag records
         for tag_type, tag_value in tags_to_add:
-            tag = TraceTag(
-                trace_id=trace.id,
-                tag_type=tag_type,
-                tag_value=tag_value,
-                confidence_score=1.0,  # High confidence for auto-generated tags
-                created_at=datetime.utcnow()
+            # Check if tag already exists for this trace
+            existing_tag_query = select(TraceTag).where(
+                and_(
+                    TraceTag.trace_id == trace.id,
+                    TraceTag.tag_type == tag_type,
+                    TraceTag.tag_value == tag_value
+                )
             )
-            session.add(tag)
+            existing_result = await session.execute(existing_tag_query)
+            existing_tag = existing_result.scalar_one_or_none()
+            
+            if not existing_tag:
+                tag = TraceTag(
+                    trace_id=trace.id,
+                    tag_type=tag_type,
+                    tag_value=tag_value,
+                    confidence_score=1.0,  # High confidence for auto-generated tags
+                    created_at=datetime.utcnow()
+                )
+                session.add(tag)
         
         await session.commit()
+    
+    async def add_manual_tags(
+        self, 
+        trace_id: UUID, 
+        tags: List[Dict[str, Any]], 
+        user_id: Optional[UUID] = None
+    ) -> None:
+        """
+        Add manual tags to a trace.
+        
+        Args:
+            trace_id: ID of the trace to tag
+            tags: List of tag dictionaries with 'type', 'value', and optional 'confidence'
+            user_id: ID of the user adding the tags
+        """
+        async with AsyncSessionLocal() as session:
+            for tag_data in tags:
+                tag_type = tag_data.get("type")
+                tag_value = tag_data.get("value")
+                confidence = tag_data.get("confidence", 0.9)  # Default confidence for manual tags
+                
+                if not tag_type or not tag_value:
+                    continue
+                
+                # Check if tag already exists
+                existing_tag_query = select(TraceTag).where(
+                    and_(
+                        TraceTag.trace_id == trace_id,
+                        TraceTag.tag_type == tag_type,
+                        TraceTag.tag_value == tag_value
+                    )
+                )
+                existing_result = await session.execute(existing_tag_query)
+                existing_tag = existing_result.scalar_one_or_none()
+                
+                if not existing_tag:
+                    tag = TraceTag(
+                        trace_id=trace_id,
+                        tag_type=tag_type,
+                        tag_value=tag_value,
+                        confidence_score=confidence,
+                        created_by=user_id,
+                        created_at=datetime.utcnow()
+                    )
+                    session.add(tag)
+            
+            await session.commit()
+    
+    async def get_trace_tags(self, trace_id: UUID) -> List[Dict[str, Any]]:
+        """Get all tags for a specific trace."""
+        async with AsyncSessionLocal() as session:
+            query = select(TraceTag).where(TraceTag.trace_id == trace_id)
+            result = await session.execute(query)
+            tags = result.scalars().all()
+            
+            return [
+                {
+                    "id": str(tag.id),
+                    "type": tag.tag_type,
+                    "value": tag.tag_value,
+                    "confidence": tag.confidence_score,
+                    "created_by": str(tag.created_by) if tag.created_by else None,
+                    "created_at": tag.created_at.isoformat()
+                }
+                for tag in tags
+            ]
+    
+    async def get_tag_taxonomy(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get the current tag taxonomy for building dynamic filters.
+        
+        Returns:
+            Dictionary with tag types as keys and lists of tag values with counts
+        """
+        async with AsyncSessionLocal() as session:
+            # Get tag counts by type and value
+            tag_stats_query = select(
+                TraceTag.tag_type,
+                TraceTag.tag_value,
+                func.count(TraceTag.id).label('count'),
+                func.avg(TraceTag.confidence_score).label('avg_confidence')
+            ).group_by(TraceTag.tag_type, TraceTag.tag_value).order_by(
+                TraceTag.tag_type, func.count(TraceTag.id).desc()
+            )
+            
+            result = await session.execute(tag_stats_query)
+            tag_data = result.all()
+            
+            taxonomy = {}
+            for row in tag_data:
+                if row.tag_type not in taxonomy:
+                    taxonomy[row.tag_type] = []
+                
+                taxonomy[row.tag_type].append({
+                    "value": row.tag_value,
+                    "count": row.count,
+                    "confidence": float(row.avg_confidence) if row.avg_confidence else None
+                })
+            
+            return taxonomy
     
     async def get_traces(
         self,

@@ -176,4 +176,30 @@ class TraceTag(Base):
     __table_args__ = (
         Index('idx_trace_tag_type_value', 'tag_type', 'tag_value'),
         Index('idx_trace_tag_trace_type', 'trace_id', 'tag_type'),
+    )
+
+
+class FilterPreset(Base):
+    __tablename__ = "filter_presets"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    filter_config = Column(JSON, nullable=False)  # Complete filter configuration
+    is_public = Column(Boolean, default=False)  # Whether preset can be shared
+    is_default = Column(Boolean, default=False)  # Whether this is user's default preset
+    usage_count = Column(Integer, default=0)  # Track how often preset is used
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    user = relationship("User")
+    
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_filter_preset_user_name', 'user_id', 'name'),
+        Index('idx_filter_preset_public', 'is_public'),
+        Index('idx_filter_preset_user_default', 'user_id', 'is_default'),
     ) 
