@@ -1,37 +1,40 @@
 """
-API endpoints for human evaluation management.
-Implements the Human Evaluation Dashboard backend for Task 4.
-Enhanced with Advanced Filtering & Taxonomy System for Task 5.
+API endpoints for evaluation management.
+Provides REST endpoints for human evaluations, model evaluations, and related operations.
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List, Union
+import logging
+from typing import List, Optional, Dict, Any, Union
+from datetime import datetime
 from uuid import UUID
-import base64
-import json
-import zlib
-from urllib.parse import quote, unquote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
-from pydantic import BaseModel, Field, validator, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, or_, func, desc, asc, text
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import select, and_, or_, desc
+from sqlalchemy.orm import selectinload
 
-from auth.security import get_current_user_email
 from database.connection import get_db
-from database.models import Evaluation, Trace, User, EvaluationStatus, TraceTag, FilterPreset
-from services.taxonomy_builder import taxonomy_builder
-from services.cache_manager import get_cache_manager, cache_filter_results, get_cached_filter_results
-from services.evaluator_models import (
-    evaluator_manager, 
-    EvaluationRequest as ModelEvaluationRequest,
-    EvaluationResult as ModelEvaluationResult,
-    EvaluationCriteria,
-    BatchEvaluationResult
-)
+from database.models import Trace, Evaluation, User
+from auth.security import get_current_user_email
 
+# Import evaluation-related services
+try:
+    from services.evaluator_models import evaluator_manager, EvaluationRequest, EvaluationCriteria
+    EVALUATOR_MODELS_AVAILABLE = True
+except ImportError:
+    evaluator_manager = None
+    EVALUATOR_MODELS_AVAILABLE = False
 
+try:
+    from services.batch_evaluation import batch_processor
+    BATCH_PROCESSING_AVAILABLE = True
+except ImportError:
+    batch_processor = None
+    BATCH_PROCESSING_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -1954,45 +1957,1009 @@ async def evaluate_with_calibration(
     evaluation_request: ModelEvaluationRequestSchema,
     current_user: str = Depends(get_current_user_email)
 ):
-    """
-    Evaluate a trace using AI models with automatic score calibration.
-    """
+    """Evaluate a trace with automatic score calibration."""
     try:
-        from services.evaluator_models import evaluator_manager, EvaluationRequest as ModelEvaluationRequest
+        if not EVALUATOR_MODELS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Model evaluation service is not available"
+            )
+        
+        # Convert schema to internal request
+        from services.evaluator_models import EvaluationRequest, EvaluationCriteria
+        
+        # Parse criteria
+        criteria_enums = []
+        for criterion in evaluation_request.criteria:
+            try:
+                criteria_enums.append(EvaluationCriteria(criterion))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid evaluation criterion: {criterion}"
+                )
         
         # Create evaluation request
-        request = ModelEvaluationRequest(
+        eval_request = EvaluationRequest(
             trace_id=evaluation_request.trace_id,
             user_input=evaluation_request.user_input,
             model_output=evaluation_request.model_output,
             system_prompt=evaluation_request.system_prompt,
-            context=evaluation_request.context,
-            criteria=evaluation_request.criteria,
+            context=evaluation_request.context or {},
+            criteria=criteria_enums,
             custom_prompt=evaluation_request.custom_prompt,
             reference_answer=evaluation_request.reference_answer
         )
         
-        # Evaluate with calibration
+        # Perform evaluation with calibration
         result = await evaluator_manager.evaluate_single_with_calibration(
-            request=request,
-            evaluator_name=evaluation_request.evaluator_model,
+            eval_request,
+            evaluation_request.evaluator_model,
             use_calibration=evaluation_request.use_calibration
         )
         
+        # Return response
+        return ModelEvaluationResponse(
+            trace_id=result.trace_id,
+            evaluator_model=result.evaluator_model,
+            criteria=result.criteria.value,
+            score=result.score,
+            reasoning=result.reasoning,
+            confidence=result.confidence,
+            evaluation_time_ms=result.evaluation_time_ms or 0,
+            cost_usd=result.cost_usd,
+            metadata=result.metadata or {}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in evaluate_with_calibration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# BATCH PROCESSING ENDPOINTS
+# ============================================
+
+# Import batch processing components
+try:
+    from services.batch_evaluation import (
+        batch_processor, BatchJob, BatchProgress, BatchStatus, BatchStrategy, 
+        TaskPriority, EvaluationCriteria
+    )
+    BATCH_PROCESSING_AVAILABLE = True
+except ImportError:
+    batch_processor = None
+    BATCH_PROCESSING_AVAILABLE = False
+    logger.warning("Batch processing service not available")
+
+# Batch processing schemas
+class BatchJobCreateRequest(BaseModel):
+    """Schema for creating a batch evaluation job."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    trace_ids: List[str] = Field(..., description="List of trace IDs to evaluate")
+    criteria: List[str] = Field(..., description="Evaluation criteria to assess")
+    evaluator_model: Optional[str] = Field(None, description="Specific evaluator model to use")
+    strategy: str = Field("fifo", description="Batch processing strategy (fifo, priority, chunked, cost_optimized)")
+    parallel_workers: int = Field(5, ge=1, le=20, description="Number of parallel workers")
+    job_name: Optional[str] = Field(None, description="Name for the batch job")
+    description: Optional[str] = Field(None, description="Description of the batch job")
+    priority: str = Field("medium", description="Default task priority (low, medium, high, critical)")
+    use_calibration: bool = Field(True, description="Whether to apply score calibration")
+    custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
+
+class BatchJobResponse(BaseModel):
+    """Schema for batch job response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    job_id: str
+    name: Optional[str]
+    description: Optional[str]
+    status: str
+    strategy: str
+    parallel_workers: int
+    total_tasks: int
+    completed_tasks: int
+    failed_tasks: int
+    skipped_tasks: int
+    estimated_total_cost: float
+    actual_total_cost: float
+    created_by: Optional[str]
+    created_at: str
+    started_at: Optional[str]
+    completed_at: Optional[str]
+
+class BatchProgressResponse(BaseModel):
+    """Schema for batch progress response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    job_id: str
+    status: str
+    total_tasks: int
+    completed_tasks: int
+    failed_tasks: int
+    skipped_tasks: int
+    current_workers: int
+    progress_percentage: float
+    estimated_time_remaining_seconds: Optional[int]
+    throughput_tasks_per_minute: float
+    average_task_duration_ms: float
+    estimated_total_cost: float
+    actual_total_cost: float
+    last_updated: str
+
+class BatchJobListResponse(BaseModel):
+    """Schema for batch job list response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    jobs: List[BatchJobResponse]
+    total_count: int
+
+class SystemStatsResponse(BaseModel):
+    """Schema for batch system statistics."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    active_jobs: int
+    running_jobs: int
+    total_workers: int
+    max_workers: int
+    total_processed: int
+    total_errors: int
+    uptime_seconds: float
+    success_rate: float
+    throughput_per_hour: float
+
+@router.post("/batch-evaluation/jobs", response_model=BatchJobResponse)
+async def create_batch_job(
+    request: BatchJobCreateRequest,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Create a new batch evaluation job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        # Parse criteria
+        criteria_enums = []
+        for criterion in request.criteria:
+            try:
+                criteria_enums.append(EvaluationCriteria(criterion))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid evaluation criterion: {criterion}"
+                )
+        
+        # Parse strategy
+        try:
+            strategy = BatchStrategy(request.strategy)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid batch strategy: {request.strategy}"
+            )
+        
+        # Parse priority
+        try:
+            priority = TaskPriority(request.priority)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid task priority: {request.priority}"
+            )
+        
+        # Create batch job
+        job = await batch_processor.create_batch_job(
+            trace_ids=request.trace_ids,
+            criteria=criteria_enums,
+            evaluator_model=request.evaluator_model,
+            strategy=strategy,
+            parallel_workers=request.parallel_workers,
+            job_name=request.job_name,
+            description=request.description,
+            priority=priority,
+            use_calibration=request.use_calibration,
+            custom_prompt=request.custom_prompt,
+            created_by=current_user
+        )
+        
+        return BatchJobResponse(
+            job_id=job.id,
+            name=job.name,
+            description=job.description,
+            status=job.status.value,
+            strategy=job.strategy.value,
+            parallel_workers=job.parallel_workers,
+            total_tasks=job.total_tasks,
+            completed_tasks=job.completed_tasks,
+            failed_tasks=job.failed_tasks,
+            skipped_tasks=job.skipped_tasks,
+            estimated_total_cost=job.estimated_total_cost,
+            actual_total_cost=job.actual_total_cost,
+            created_by=job.created_by,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating batch job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-evaluation/jobs/{job_id}/start")
+async def start_batch_job(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Start processing a batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        success = await batch_processor.start_batch_job(job_id)
+        
+        if success:
+            return {"message": f"Batch job {job_id} started successfully", "job_id": job_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to start batch job")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error starting batch job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-evaluation/jobs/{job_id}/pause")
+async def pause_batch_job(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Pause a running batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        success = await batch_processor.pause_batch_job(job_id)
+        
+        if success:
+            return {"message": f"Batch job {job_id} paused successfully", "job_id": job_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to pause batch job")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error pausing batch job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-evaluation/jobs/{job_id}/resume")
+async def resume_batch_job(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Resume a paused batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        success = await batch_processor.resume_batch_job(job_id)
+        
+        if success:
+            return {"message": f"Batch job {job_id} resumed successfully", "job_id": job_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to resume batch job")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error resuming batch job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-evaluation/jobs/{job_id}/cancel")
+async def cancel_batch_job(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Cancel a batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        success = await batch_processor.cancel_batch_job(job_id)
+        
+        if success:
+            return {"message": f"Batch job {job_id} cancelled successfully", "job_id": job_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to cancel batch job")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error cancelling batch job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/batch-evaluation/jobs/{job_id}", response_model=BatchJobResponse)
+async def get_batch_job(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get details of a specific batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        job = await batch_processor.get_batch_job(job_id)
+        
+        return BatchJobResponse(
+            job_id=job.id,
+            name=job.name,
+            description=job.description,
+            status=job.status.value,
+            strategy=job.strategy.value,
+            parallel_workers=job.parallel_workers,
+            total_tasks=job.total_tasks,
+            completed_tasks=job.completed_tasks,
+            failed_tasks=job.failed_tasks,
+            skipped_tasks=job.skipped_tasks,
+            estimated_total_cost=job.estimated_total_cost,
+            actual_total_cost=job.actual_total_cost,
+            created_by=job.created_by,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting batch job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/batch-evaluation/jobs/{job_id}/progress", response_model=BatchProgressResponse)
+async def get_batch_progress(
+    job_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get real-time progress of a batch job."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        progress = await batch_processor.get_batch_progress(job_id)
+        
+        return BatchProgressResponse(
+            job_id=progress.job_id,
+            status=progress.status.value,
+            total_tasks=progress.total_tasks,
+            completed_tasks=progress.completed_tasks,
+            failed_tasks=progress.failed_tasks,
+            skipped_tasks=progress.skipped_tasks,
+            current_workers=progress.current_workers,
+            progress_percentage=progress.progress_percentage,
+            estimated_time_remaining_seconds=progress.estimated_time_remaining_seconds,
+            throughput_tasks_per_minute=progress.throughput_tasks_per_minute,
+            average_task_duration_ms=progress.average_task_duration_ms,
+            estimated_total_cost=progress.estimated_total_cost,
+            actual_total_cost=progress.actual_total_cost,
+            last_updated=progress.last_updated
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting batch progress {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/batch-evaluation/jobs", response_model=BatchJobListResponse)
+async def list_batch_jobs(
+    status: Optional[str] = Query(None, description="Filter by job status"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """List all batch jobs, optionally filtered by status."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        # Parse status filter
+        status_filter = None
+        if status:
+            try:
+                status_filter = BatchStatus(status)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status filter: {status}"
+                )
+        
+        jobs = await batch_processor.list_batch_jobs(status_filter)
+        
+        job_responses = []
+        for job in jobs:
+            job_responses.append(BatchJobResponse(
+                job_id=job.id,
+                name=job.name,
+                description=job.description,
+                status=job.status.value,
+                strategy=job.strategy.value,
+                parallel_workers=job.parallel_workers,
+                total_tasks=job.total_tasks,
+                completed_tasks=job.completed_tasks,
+                failed_tasks=job.failed_tasks,
+                skipped_tasks=job.skipped_tasks,
+                estimated_total_cost=job.estimated_total_cost,
+                actual_total_cost=job.actual_total_cost,
+                created_by=job.created_by,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                completed_at=job.completed_at
+            ))
+        
+        return BatchJobListResponse(
+            jobs=job_responses,
+            total_count=len(job_responses)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error listing batch jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/batch-evaluation/system/stats", response_model=SystemStatsResponse)
+async def get_batch_system_stats(
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get system-wide batch processing statistics."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        stats = await batch_processor.get_system_stats()
+        
+        return SystemStatsResponse(
+            active_jobs=stats["active_jobs"],
+            running_jobs=stats["running_jobs"],
+            total_workers=stats["total_workers"],
+            max_workers=stats["max_workers"],
+            total_processed=stats["total_processed"],
+            total_errors=stats["total_errors"],
+            uptime_seconds=stats["uptime_seconds"],
+            success_rate=stats["success_rate"],
+            throughput_per_hour=stats["throughput_per_hour"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting system stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-evaluation/system/cleanup")
+async def cleanup_completed_jobs(
+    older_than_hours: int = Query(24, ge=1, le=168, description="Remove completed jobs older than this many hours"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Clean up completed batch jobs older than specified time."""
+    try:
+        if not BATCH_PROCESSING_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Batch processing service is not available"
+            )
+        
+        cleaned_count = await batch_processor.cleanup_completed_jobs(older_than_hours)
+        
         return {
-            "trace_id": result.trace_id,
-            "evaluator_model": result.evaluator_model,
-            "criteria": result.criteria.value,
-            "score": result.score,
-            "reasoning": result.reasoning,
-            "confidence": result.confidence,
-            "evaluation_time_ms": result.evaluation_time_ms,
-            "cost_usd": result.cost_usd,
-            "metadata": result.metadata
+            "message": f"Cleaned up {cleaned_count} completed jobs",
+            "cleaned_jobs": cleaned_count,
+            "older_than_hours": older_than_hours
         }
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to evaluate with calibration: {str(e)}"
-        ) 
+        logger.error(f"Error cleaning up jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================
+# PERFORMANCE ANALYTICS AND MONITORING ENDPOINTS
+# ============================================
+
+# Import performance analytics components
+try:
+    from services.performance_analytics import (
+        performance_analytics, AnalyticsReport, TimeRange, MetricType, 
+        PerformanceMetric, ModelPerformanceComparison, SystemAlert
+    )
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    performance_analytics = None
+    ANALYTICS_AVAILABLE = False
+    logger.warning("Performance analytics service not available")
+
+# Analytics response schemas
+class SystemOverviewResponse(BaseModel):
+    """Schema for system overview response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    time_range: str
+    start_time: str
+    end_time: str
+    evaluation_metrics: Dict[str, Any]
+    batch_metrics: Dict[str, Any]
+    cost_metrics: Dict[str, Any]
+    performance_trends: Dict[str, Any]
+    model_comparison: List[Dict[str, Any]]
+    system_health: Dict[str, Any]
+    alerts: List[Dict[str, Any]]
+    calibration_metrics: Dict[str, Any]
+
+class AnalyticsReportResponse(BaseModel):
+    """Schema for analytics report response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    report_id: str
+    title: str
+    time_range: str
+    generated_at: str
+    metrics: Dict[str, Any]
+    trends: Dict[str, Any]
+    insights: List[str]
+    recommendations: List[str]
+
+class ModelComparisonResponse(BaseModel):
+    """Schema for model performance comparison."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    model_name: str
+    total_evaluations: int
+    success_rate: float
+    average_latency_ms: float
+    total_cost_usd: float
+    average_score: float
+    score_std_dev: float
+    cost_per_evaluation: float
+    throughput_per_hour: float
+    error_rate: float
+    calibration_accuracy: Optional[float] = None
+
+class SystemHealthResponse(BaseModel):
+    """Schema for system health response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    status: str
+    uptime_seconds: float
+    memory_usage: str
+    cpu_usage: str
+    database_status: str
+    batch_processor_status: str
+    calibration_system_status: str
+
+class AlertResponse(BaseModel):
+    """Schema for system alert response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    id: str
+    level: str
+    title: str
+    message: str
+    metric_type: str
+    threshold_value: float
+    current_value: float
+    timestamp: str
+    resolved: bool
+
+@router.get("/analytics/overview", response_model=SystemOverviewResponse)
+async def get_system_overview(
+    time_range: str = Query("24h", description="Time range for analytics (1h, 24h, 7d, 30d, 90d, 365d)"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get comprehensive system performance overview."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        # Validate time range
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}. Valid options: 1h, 24h, 7d, 30d, 90d, 365d"
+            )
+        
+        overview = await performance_analytics.get_system_overview(time_range_enum)
+        
+        return SystemOverviewResponse(**overview)
+        
+    except Exception as e:
+        logger.error(f"Error getting system overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/reports", response_model=AnalyticsReportResponse)
+async def generate_analytics_report(
+    time_range: str = Query("24h", description="Time range for report"),
+    include_recommendations: bool = Query(True, description="Include optimization recommendations"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Generate comprehensive analytics report."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        # Validate time range
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}"
+            )
+        
+        report = await performance_analytics.generate_analytics_report(
+            time_range_enum, 
+            include_recommendations
+        )
+        
+        # Convert report to response format
+        metrics_dict = {}
+        for name, metric in report.metrics.items():
+            metrics_dict[name] = {
+                "type": metric.metric_type.value,
+                "value": metric.value,
+                "unit": metric.unit,
+                "timestamp": metric.timestamp,
+                "metadata": metric.metadata
+            }
+        
+        trends_dict = {}
+        for name, trend in report.trends.items():
+            trends_dict[name] = {
+                "timestamps": trend.timestamps,
+                "values": trend.values,
+                "labels": trend.labels
+            }
+        
+        return AnalyticsReportResponse(
+            report_id=report.report_id,
+            title=report.title,
+            time_range=report.time_range.value,
+            generated_at=report.generated_at,
+            metrics=metrics_dict,
+            trends=trends_dict,
+            insights=report.insights,
+            recommendations=report.recommendations
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating analytics report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/models/comparison", response_model=List[ModelComparisonResponse])
+async def get_model_performance_comparison(
+    time_range: str = Query("24h", description="Time range for comparison"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get performance comparison between different evaluator models."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        # Validate time range
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}"
+            )
+        
+        overview = await performance_analytics.get_system_overview(time_range_enum)
+        model_comparisons = overview["model_comparison"]
+        
+        responses = []
+        for comparison in model_comparisons:
+            responses.append(ModelComparisonResponse(
+                model_name=comparison.model_name,
+                total_evaluations=comparison.total_evaluations,
+                success_rate=comparison.success_rate,
+                average_latency_ms=comparison.average_latency_ms,
+                total_cost_usd=comparison.total_cost_usd,
+                average_score=comparison.average_score,
+                score_std_dev=comparison.score_std_dev,
+                cost_per_evaluation=comparison.cost_per_evaluation,
+                throughput_per_hour=comparison.throughput_per_hour,
+                error_rate=comparison.error_rate,
+                calibration_accuracy=comparison.calibration_accuracy
+            ))
+        
+        return responses
+        
+    except Exception as e:
+        logger.error(f"Error getting model comparison: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/health", response_model=SystemHealthResponse)
+async def get_system_health(
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get overall system health status."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        overview = await performance_analytics.get_system_overview(TimeRange.HOUR)
+        health = overview["system_health"]
+        
+        return SystemHealthResponse(
+            status=health["status"],
+            uptime_seconds=health["uptime_seconds"],
+            memory_usage=health["memory_usage"],
+            cpu_usage=health["cpu_usage"],
+            database_status=health["database_status"],
+            batch_processor_status=health["batch_processor_status"],
+            calibration_system_status=health["calibration_system_status"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting system health: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/alerts", response_model=List[AlertResponse])
+async def get_system_alerts(
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get active system alerts."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        overview = await performance_analytics.get_system_overview(TimeRange.HOUR)
+        alerts = overview["alerts"]
+        
+        alert_responses = []
+        for alert in alerts:
+            alert_responses.append(AlertResponse(
+                id=alert.id,
+                level=alert.level.value,
+                title=alert.title,
+                message=alert.message,
+                metric_type=alert.metric_type.value,
+                threshold_value=alert.threshold_value,
+                current_value=alert.current_value,
+                timestamp=alert.timestamp,
+                resolved=alert.resolved
+            ))
+        
+        return alert_responses
+        
+    except Exception as e:
+        logger.error(f"Error getting system alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/metrics/{metric_type}")
+async def get_specific_metric(
+    metric_type: str,
+    time_range: str = Query("24h", description="Time range for metric"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get specific performance metric data."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        # Validate metric type
+        try:
+            metric_type_enum = MetricType(metric_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid metric type: {metric_type}. Valid options: throughput, accuracy, cost, latency, success_rate, calibration_performance"
+            )
+        
+        # Validate time range
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}"
+            )
+        
+        overview = await performance_analytics.get_system_overview(time_range_enum)
+        
+        # Extract specific metric data based on type
+        if metric_type_enum == MetricType.THROUGHPUT:
+            return {
+                "metric_type": metric_type,
+                "value": overview["evaluation_metrics"]["throughput_per_hour"],
+                "unit": "evaluations/hour",
+                "trend": overview["performance_trends"].get("throughput", {}),
+                "time_range": time_range
+            }
+        elif metric_type_enum == MetricType.SUCCESS_RATE:
+            return {
+                "metric_type": metric_type,
+                "value": overview["evaluation_metrics"]["success_rate"],
+                "unit": "percentage",
+                "trend": overview["performance_trends"].get("success_rate", {}),
+                "time_range": time_range
+            }
+        elif metric_type_enum == MetricType.COST:
+            return {
+                "metric_type": metric_type,
+                "value": overview["cost_metrics"]["total_cost_usd"],
+                "unit": "USD",
+                "trend": overview["cost_metrics"].get("cost_trend", {}),
+                "time_range": time_range
+            }
+        else:
+            return {
+                "metric_type": metric_type,
+                "message": "Metric data not available",
+                "time_range": time_range
+            }
+        
+    except Exception as e:
+        logger.error(f"Error getting metric {metric_type}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/analytics/reports/export")
+async def export_analytics_report(
+    time_range: str = Query("24h", description="Time range for report"),
+    format: str = Query("json", description="Export format (json, csv)"),
+    include_recommendations: bool = Query(True, description="Include recommendations"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Export analytics report in specified format."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        # Validate parameters
+        if format not in ["json", "csv"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid format. Valid options: json, csv"
+            )
+        
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}"
+            )
+        
+        # Generate report
+        report = await performance_analytics.generate_analytics_report(
+            time_range_enum, 
+            include_recommendations
+        )
+        
+        # Export in requested format
+        exported_data = await performance_analytics.export_report_data(report, format)
+        
+        if format == "csv":
+            return Response(
+                content=exported_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=analytics_report_{time_range}.csv"}
+            )
+        else:
+            return exported_data
+        
+    except Exception as e:
+        logger.error(f"Error exporting analytics report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/cost-optimization")
+async def get_cost_optimization_recommendations(
+    time_range: str = Query("7d", description="Time range for analysis"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """Get cost optimization recommendations."""
+    try:
+        if not ANALYTICS_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Performance analytics service is not available"
+            )
+        
+        try:
+            time_range_enum = TimeRange(time_range)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid time range: {time_range}"
+            )
+        
+        overview = await performance_analytics.get_system_overview(time_range_enum)
+        
+        # Extract cost-related insights and recommendations
+        cost_metrics = overview["cost_metrics"]
+        model_comparison = overview["model_comparison"]
+        
+        # Calculate potential savings
+        potential_savings = 0
+        optimizations = []
+        
+        if model_comparison and len(model_comparison) > 1:
+            most_expensive = max(model_comparison, key=lambda x: x.cost_per_evaluation)
+            least_expensive = min(model_comparison, key=lambda x: x.cost_per_evaluation)
+            
+            if most_expensive.cost_per_evaluation > least_expensive.cost_per_evaluation * 1.5:
+                savings_per_eval = most_expensive.cost_per_evaluation - least_expensive.cost_per_evaluation
+                potential_daily_savings = savings_per_eval * most_expensive.total_evaluations / ((time_range_enum == TimeRange.DAY and 1) or 7)
+                potential_savings += potential_daily_savings
+                
+                optimizations.append({
+                    "type": "model_substitution",
+                    "description": f"Replace {most_expensive.model_name} with {least_expensive.model_name}",
+                    "current_cost": most_expensive.cost_per_evaluation,
+                    "optimized_cost": least_expensive.cost_per_evaluation,
+                    "potential_daily_savings": potential_daily_savings,
+                    "impact": "Replace expensive model with cost-efficient alternative"
+                })
+        
+        return {
+            "time_range": time_range,
+            "analysis_period": f"{overview['start_time']} to {overview['end_time']}",
+            "current_metrics": {
+                "total_cost": cost_metrics["total_cost_usd"],
+                "average_cost_per_evaluation": cost_metrics["average_cost_per_evaluation"],
+                "monthly_projection": cost_metrics["monthly_projection_usd"]
+            },
+            "optimization_opportunities": optimizations,
+            "potential_monthly_savings": potential_savings * 30,
+            "cost_breakdown_by_model": cost_metrics["cost_by_model"],
+            "recommendations": [rec for rec in overview.get("recommendations", []) if "cost" in rec.lower() or "expensive" in rec.lower()]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting cost optimization recommendations: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 

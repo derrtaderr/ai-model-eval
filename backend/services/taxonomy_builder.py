@@ -14,29 +14,6 @@ from collections import defaultdict, Counter
 import re
 from dataclasses import dataclass
 
-# Backwards compatible OpenAI import - moved to avoid module-level import errors
-openai = None
-HAS_ASYNC_OPENAI = False
-
-def _initialize_openai():
-    """Initialize OpenAI client based on available version."""
-    global openai, HAS_ASYNC_OPENAI
-    
-    try:
-        from openai import AsyncOpenAI
-        HAS_ASYNC_OPENAI = True
-        return True
-    except ImportError:
-        try:
-            import openai as openai_module
-            openai = openai_module
-            HAS_ASYNC_OPENAI = False
-            return True
-        except ImportError:
-            openai = None
-            HAS_ASYNC_OPENAI = False
-            return False
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
@@ -45,6 +22,34 @@ from database.models import Trace, TraceTag
 from database.connection import get_db
 from config.settings import get_settings
 
+# Global variables for OpenAI compatibility
+openai = None
+AsyncOpenAI = None
+HAS_ASYNC_OPENAI = False
+
+def _initialize_openai():
+    """Initialize OpenAI client based on available version."""
+    global openai, AsyncOpenAI, HAS_ASYNC_OPENAI
+    
+    try:
+        # Try to import the new AsyncOpenAI first
+        from openai import AsyncOpenAI as AsyncOpenAIClient
+        AsyncOpenAI = AsyncOpenAIClient
+        HAS_ASYNC_OPENAI = True
+        return True
+    except ImportError:
+        try:
+            # Fall back to the older synchronous openai module
+            import openai as openai_module
+            openai = openai_module
+            HAS_ASYNC_OPENAI = False
+            return True
+        except ImportError:
+            # OpenAI not available at all
+            openai = None
+            AsyncOpenAI = None
+            HAS_ASYNC_OPENAI = False
+            return False
 
 class TaxonomyBuilder:
     """
@@ -593,7 +598,7 @@ Conversation samples:
 
     async def _call_llm_for_scenarios(self, sample_traces: List[Dict[str, Any]], max_traces: int = 20) -> List[str]:
         """Call LLM to analyze traces and extract scenarios with backward compatibility."""
-        if not self.openai_available:
+        if not self.openai_available or not AsyncOpenAI:
             return []
         
         try:
@@ -620,7 +625,7 @@ Conversation samples:
             Example format: ["Code Generation", "Question Answering", "Creative Writing"]
             """
             
-            if HAS_ASYNC_OPENAI:
+            if HAS_ASYNC_OPENAI and AsyncOpenAI:
                 # Use modern AsyncOpenAI
                 client = AsyncOpenAI(api_key=self.settings.openai_api_key)
                 response = await client.chat.completions.create(
