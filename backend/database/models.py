@@ -74,11 +74,29 @@ class Trace(Base):
     evaluations = relationship("Evaluation", back_populates="trace", cascade="all, delete-orphan")
     trace_tags = relationship("TraceTag", back_populates="trace", cascade="all, delete-orphan")
     
-    # Indexes for performance
+    # Performance indexes for filtering
     __table_args__ = (
-        Index('idx_trace_model_timestamp', 'model_name', 'timestamp'),
-        Index('idx_trace_user_timestamp', 'user_id', 'timestamp'),
-        Index('idx_trace_session_timestamp', 'session_id', 'timestamp'),
+        # Single column indexes for common filters
+        Index('idx_traces_session_id', 'session_id'),
+        Index('idx_traces_user_id', 'user_id'),
+        Index('idx_traces_model_name', 'model_name'),
+        Index('idx_traces_timestamp', 'timestamp'),
+        Index('idx_traces_latency_ms', 'latency_ms'),
+        Index('idx_traces_cost_usd', 'cost_usd'),
+        
+        # Composite indexes for multi-dimensional filtering
+        Index('idx_traces_session_timestamp', 'session_id', 'timestamp'),
+        Index('idx_traces_user_timestamp', 'user_id', 'timestamp'),
+        Index('idx_traces_model_timestamp', 'model_name', 'timestamp'),
+        Index('idx_traces_session_model', 'session_id', 'model_name'),
+        Index('idx_traces_user_model', 'user_id', 'model_name'),
+        
+        # Performance range indexes
+        Index('idx_traces_latency_timestamp', 'latency_ms', 'timestamp'),
+        Index('idx_traces_cost_timestamp', 'cost_usd', 'timestamp'),
+        
+        # Full-text search optimization (PostgreSQL specific)
+        # Index('idx_traces_fulltext', func.to_tsvector('english', func.coalesce('user_input', '') + ' ' + func.coalesce('model_output', '') + ' ' + func.coalesce('system_prompt', '')), postgresql_using='gin'),
     )
 
 
@@ -86,7 +104,7 @@ class Evaluation(Base):
     __tablename__ = "evaluations"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id"), nullable=False, index=True)
+    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id", ondelete="CASCADE"), nullable=False, index=True)
     evaluator_type = Column(String(50), nullable=False)  # "human", "model", "automated"
     evaluator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     score = Column(Float, nullable=True)  # Numeric score if applicable
@@ -98,6 +116,21 @@ class Evaluation(Base):
     # Relationships
     trace = relationship("Trace", back_populates="evaluations")
     evaluator = relationship("User", foreign_keys=[evaluator_id])
+
+    # Performance indexes for evaluation filtering
+    __table_args__ = (
+        Index('idx_evaluations_trace_id', 'trace_id'),
+        Index('idx_evaluations_type', 'evaluator_type'),
+        Index('idx_evaluations_score', 'score'),
+        Index('idx_evaluations_evaluator', 'evaluator_id'),
+        Index('idx_evaluations_date', 'evaluated_at'),
+        
+        # Composite indexes for evaluation analysis
+        Index('idx_evaluations_trace_type', 'trace_id', 'evaluator_type'),
+        Index('idx_evaluations_type_score', 'evaluator_type', 'score'),
+        Index('idx_evaluations_evaluator_date', 'evaluator_id', 'evaluated_at'),
+        Index('idx_evaluations_type_date', 'evaluator_type', 'evaluated_at'),
+    )
 
 
 class TestCase(Base):
@@ -161,7 +194,7 @@ class TraceTag(Base):
     __tablename__ = "trace_tags"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id"), nullable=False, index=True)
+    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_type = Column(String(50), nullable=False, index=True)  # "tool", "scenario", "topic", etc.
     tag_value = Column(String(255), nullable=False, index=True)
     confidence_score = Column(Float, nullable=True)  # For auto-generated tags
@@ -172,10 +205,20 @@ class TraceTag(Base):
     trace = relationship("Trace", back_populates="trace_tags")
     creator = relationship("User")
     
-    # Composite index for efficient filtering
+    # Performance indexes for tag filtering
     __table_args__ = (
-        Index('idx_trace_tag_type_value', 'tag_type', 'tag_value'),
-        Index('idx_trace_tag_trace_type', 'trace_id', 'tag_type'),
+        Index('idx_trace_tags_trace_id', 'trace_id'),
+        Index('idx_trace_tags_name', 'tag_type'),
+        Index('idx_trace_tags_value', 'tag_value'),
+        Index('idx_trace_tags_type', 'tag_type'),
+        
+        # Composite indexes for tag queries
+        Index('idx_trace_tags_trace_name', 'trace_id', 'tag_type'),
+        Index('idx_trace_tags_name_value', 'tag_type', 'tag_value'),
+        Index('idx_trace_tags_type_name', 'tag_type', 'tag_type'),
+        
+        # Unique constraint for preventing duplicate tags
+        Index('idx_trace_tags_unique', 'trace_id', 'tag_type', 'tag_value', unique=True),
     )
 
 

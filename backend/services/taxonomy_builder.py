@@ -6,16 +6,36 @@ Part of Task 5 - Advanced Filtering & Taxonomy System.
 
 import asyncio
 import json
+import logging
+import time
 from typing import Dict, List, Any, Optional, Tuple, Set
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 import re
+from dataclasses import dataclass
 
-try:
-    import openai
-    openai_available = True
-except ImportError:
-    openai_available = False
+# Backwards compatible OpenAI import - moved to avoid module-level import errors
+openai = None
+HAS_ASYNC_OPENAI = False
+
+def _initialize_openai():
+    """Initialize OpenAI client based on available version."""
+    global openai, HAS_ASYNC_OPENAI
+    
+    try:
+        from openai import AsyncOpenAI
+        HAS_ASYNC_OPENAI = True
+        return True
+    except ImportError:
+        try:
+            import openai as openai_module
+            openai = openai_module
+            HAS_ASYNC_OPENAI = False
+            return True
+        except ImportError:
+            openai = None
+            HAS_ASYNC_OPENAI = False
+            return False
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -35,9 +55,18 @@ class TaxonomyBuilder:
     
     def __init__(self):
         self.settings = get_settings()
-        self.openai_available = openai_available and self.settings.openai_api_key
-        if self.openai_available:
-            openai.api_key = self.settings.openai_api_key
+        
+        # Initialize OpenAI with backward compatibility
+        self.openai_available = _initialize_openai() and hasattr(self.settings, 'openai_api_key') and self.settings.openai_api_key
+        
+        if self.openai_available and openai:
+            if HAS_ASYNC_OPENAI:
+                # Modern async client will be created when needed
+                pass
+            else:
+                # Legacy sync API
+                openai.api_key = self.settings.openai_api_key
+                
         self.cache_duration_hours = 24
         self._taxonomy_cache = {}
         self._last_build_time = None
@@ -561,6 +590,77 @@ Conversation samples:
         
         await session.commit()
         return new_tags
+
+    async def _call_llm_for_scenarios(self, sample_traces: List[Dict[str, Any]], max_traces: int = 20) -> List[str]:
+        """Call LLM to analyze traces and extract scenarios with backward compatibility."""
+        if not self.openai_available:
+            return []
+        
+        try:
+            # Sample traces if we have too many
+            if len(sample_traces) > max_traces:
+                sample_traces = sample_traces[:max_traces]
+            
+            # Prepare context
+            trace_summaries = []
+            for trace in sample_traces:
+                summary = f"Input: {str(trace.get('user_input', ''))[:100]}..."
+                if trace.get('model_output'):
+                    summary += f" Output: {str(trace['model_output'])[:100]}..."
+                trace_summaries.append(summary)
+            
+            prompt = f"""
+            Analyze these AI system interactions and identify distinct scenarios or use cases:
+            
+            {chr(10).join(trace_summaries)}
+            
+            Return a JSON list of 3-8 distinct scenario names that best categorize these interactions.
+            Focus on the purpose/intent of each interaction (e.g., "Code Generation", "Question Answering", "Data Analysis").
+            
+            Example format: ["Code Generation", "Question Answering", "Creative Writing"]
+            """
+            
+            if HAS_ASYNC_OPENAI:
+                # Use modern AsyncOpenAI
+                client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+                response = await client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
+                    temperature=0.3
+                )
+                response_text = response.choices[0].message.content
+            else:
+                # Use legacy sync API in a thread
+                import asyncio
+                
+                def sync_openai_call():
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=200,
+                        temperature=0.3
+                    )
+                    return response.choices[0].message.content
+                
+                loop = asyncio.get_event_loop()
+                response_text = await loop.run_in_executor(None, sync_openai_call)
+            
+            # Parse JSON response
+            try:
+                scenarios = json.loads(response_text)
+                if isinstance(scenarios, list):
+                    return [str(s).strip() for s in scenarios if s]
+                return []
+            except json.JSONDecodeError:
+                # Fallback: extract scenarios from text
+                import re
+                scenarios = re.findall(r'"([^"]+)"', response_text)
+                return scenarios[:8] if scenarios else []
+                
+        except Exception as e:
+            print(f"Error calling LLM for scenario analysis: {e}")
+            return []
 
 
 # Global instance
