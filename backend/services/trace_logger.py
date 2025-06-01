@@ -1,22 +1,22 @@
 """
-Trace logging service for capturing LLM interactions with LangSmith integration.
+Trace logging service for capturing and managing LLM interactions.
 """
 
-import asyncio
-import json
-import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from uuid import UUID, uuid4
+import asyncio
+import logging
 
-from langsmith import Client
-from langchain.callbacks.tracers import LangChainTracer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from decouple import config
 
-from ..database.models import Trace, User, TraceTag
-from ..database.connection import AsyncSessionLocal
+from database.models import Trace, User, TraceTag
+from database.connection import AsyncSessionLocal
+
+from langsmith import Client
+from langchain.callbacks.tracers import LangChainTracer
 
 
 class TraceLogger:

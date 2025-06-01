@@ -1,5 +1,5 @@
 """
-Utility functions for LangChain and LangSmith integration.
+LangChain integration utilities for the LLM Evaluation Platform.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from langchain.schema import BaseMessage
 from langsmith import Client
 from decouple import config
 
-from ..services.trace_logger import trace_logger
+from services.trace_logger import trace_logger
 
 
 class EvalPlatformCallbackHandler(BaseCallbackHandler):

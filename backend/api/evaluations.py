@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_, or_, func
 from sqlalchemy.orm import selectinload
 
-from ..auth.security import get_current_user_email
-from ..database.connection import get_db
-from ..database.models import Evaluation, Trace, User, EvaluationStatus
+from auth.security import get_current_user_email
+from database.connection import get_db
+from database.models import Evaluation, Trace, User, EvaluationStatus
 
 
 router = APIRouter()

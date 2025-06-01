@@ -1,18 +1,19 @@
 """
-Main FastAPI application for the LLM Evaluation Platform.
+Main FastAPI application for LLM Evaluation Platform.
 """
 
+import uvicorn
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-import uvicorn
 
-from backend.database.connection import create_tables
-from backend.auth.security import get_current_user_email
-from backend.api.traces import router as traces_router
-from backend.api.tests import router as tests_router
-from backend.api.evaluations import router as evaluations_router
+# Use absolute imports that work when running directly
+from database.connection import create_tables
+from auth.security import get_current_user_email
+from api.traces import router as traces_router
+from api.tests import router as tests_router
+from api.evaluations import router as evaluations_router
 
 
 @asynccontextmanager

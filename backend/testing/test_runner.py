@@ -1,19 +1,20 @@
 """
-Test runner engine for executing LLM test cases.
+Test runner service for executing test suites against LLM outputs.
 """
 
 import asyncio
-import uuid
+import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
+from uuid import UUID, uuid4
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from ..database.models import TestCase, TestRun, Trace
-from ..database.connection import AsyncSessionLocal
+from database.models import TestCase, TestRun, Trace
+from database.connection import AsyncSessionLocal
 from .assertions import create_assertion, AssertionOutcome, AssertionResult
 
 
@@ -69,7 +70,7 @@ class TestRunner:
             TestExecutionResult with the outcome
         """
         start_time = datetime.now()
-        test_run_id = str(uuid.uuid4())
+        test_run_id = str(uuid4())
         assertion_results = []
         overall_status = "passed"
         error_message = None
@@ -185,7 +186,7 @@ class TestRunner:
                     # Create error result for failed test
                     error_result = TestExecutionResult(
                         test_case_id=str(test_cases[i].id),
-                        test_run_id=str(uuid.uuid4()),
+                        test_run_id=str(uuid4()),
                         status="error",
                         assertion_results=[],
                         execution_time_ms=0,
@@ -350,7 +351,7 @@ class TestRunner:
     
     async def _store_test_run(
         self,
-        test_case_id: uuid.UUID,
+        test_case_id: UUID,
         test_run_id: str,
         status: str,
         result: Optional[Dict[str, Any]],

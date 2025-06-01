@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
-from ..auth.security import get_current_user_email
-from ..database.connection import get_db
-from ..database.models import TestCase, TestRun, Trace
-from ..testing.test_runner import test_runner, TestSuiteResult
-from ..testing.assertions import ASSERTION_REGISTRY
+from auth.security import get_current_user_email
+from database.connection import get_db
+from database.models import TestCase, TestRun, Trace
+from testing.test_runner import test_runner, TestSuiteResult
+from testing.assertions import ASSERTION_REGISTRY
 
 
 router = APIRouter()

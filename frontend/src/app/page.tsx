@@ -86,15 +86,47 @@ export default function EvaluationDashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load traces from backend API
+  // Mock API functions (replace with real API calls when backend is ready)
+  const mockApiCall = async (endpoint: string): Promise<Trace[] | { success: boolean; message: string; tracesProcessed?: number; newTraces?: number }> => {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    if (endpoint === '/api/evaluations/traces') {
+      // Return empty array initially - data comes from uploads
+      return [];
+    }
+    
+    if (endpoint.includes('/api/evaluations/submit')) {
+      // Simulate successful evaluation submission
+      return { success: true, message: 'Evaluation submitted successfully' };
+    }
+    
+    if (endpoint.includes('/api/evaluations/upload')) {
+      // Simulate successful upload
+      return { 
+        success: true, 
+        message: 'Data uploaded successfully',
+        tracesProcessed: 5,
+        newTraces: 3
+      };
+    }
+    
+    return { success: true, message: 'Operation completed' };
+  };
+
+  // Load traces from backend API (currently mocked)
   const loadTraces = async () => {
     try {
-      // This will call the actual backend API when implemented
-      const response = await fetch('/api/evaluations/traces');
-      if (response.ok) {
-        const data = await response.json();
+      setIsLoading(true);
+      // Use mock API for now
+      const response = await mockApiCall('/api/evaluations/traces');
+      
+      // Ensure we only set traces if we get an array
+      if (Array.isArray(response)) {
+        const data: Trace[] = response;
         setTraces(data);
         
         // Dynamically build filter options from actual data
@@ -104,14 +136,14 @@ export default function EvaluationDashboard() {
         setFilterOptions({
           tools: ['All Tools', ...tools],
           scenarios: ['All Scenarios', ...scenarios],
-          statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
-          dataSources: ['All Sources', 'Human', 'Synthetic']
+          statuses: ['All Status', 'pending', 'accepted', 'rejected'],
+          dataSources: ['All Sources', 'human', 'synthetic']
         });
       }
-    } catch {
-      console.log('No backend connection - using empty state');
-      // In development without backend, show empty state
-      setTraces([]);
+    } catch (error) {
+      console.error('Failed to load traces:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -153,63 +185,100 @@ export default function EvaluationDashboard() {
     setUploadError(null);
   };
 
-  // Process uploaded file and extract trace data
+  // Process uploaded file
   const processUpload = async () => {
     if (!uploadFile) return;
 
-    setIsUploading(true);
-    setUploadProgress(0);
-
+    let progressInterval: NodeJS.Timeout | undefined;
+    
     try {
+      setIsUploading(true);
+      setUploadError(null);
+      
+      // Simulate progress
+      progressInterval = setInterval(() => {
+        setUploadProgress(prev => Math.min(prev + 10, 90));
+      }, 100);
+
       const text = await uploadFile.text();
       let parsedData: Trace[] = [];
 
-      // Parse different file formats
       if (uploadFile.name.endsWith('.json')) {
-        const jsonData = JSON.parse(text);
-        // Handle both single traces and arrays of traces
-        parsedData = Array.isArray(jsonData) ? jsonData : [jsonData];
+        try {
+          const jsonData = JSON.parse(text);
+          // Handle both single trace and array of traces
+          if (Array.isArray(jsonData)) {
+            parsedData = jsonData;
+          } else {
+            parsedData = [jsonData];
+          }
+          
+          // Validate and ensure each trace has required fields
+          parsedData = parsedData.map((trace: Record<string, unknown>, index) => ({
+            id: trace.id as string || `uploaded-${Date.now()}-${index}`,
+            timestamp: trace.timestamp as string || new Date().toLocaleString(),
+            tool: trace.tool as string || 'Unknown Tool',
+            scenario: trace.scenario as string || 'Unknown Scenario',
+            status: (trace.status as 'pending' | 'accepted' | 'rejected') || 'pending',
+            modelScore: (trace.modelScore as 'pass' | 'fail') || 'pass',
+            humanScore: (trace.humanScore as 'good' | 'bad' | null) || null,
+            dataSource: (trace.dataSource as 'human' | 'synthetic') || 'human',
+            conversation: {
+              userInput: (trace.conversation as any)?.userInput || trace.userInput as string || 'No input provided',
+              aiResponse: (trace.conversation as any)?.aiResponse || trace.aiResponse as string || 'No response provided',
+              systemPrompt: (trace.conversation as any)?.systemPrompt || trace.systemPrompt as string || 'No system prompt'
+            },
+            functions: (trace.functions as any[]) || [],
+            metadata: (trace.metadata as any) || {
+              modelName: 'Unknown Model',
+              latencyMs: 0,
+              tokenCount: { input: 0, output: 0 },
+              cost: 0
+            }
+          }));
+          
+        } catch {
+          throw new Error('Invalid JSON format');
+        }
       } else if (uploadFile.name.endsWith('.csv')) {
         // Basic CSV parsing - in production you'd use a proper CSV parser
         // CSV parsing would be more complex in real implementation
         parsedData = []; // Placeholder for CSV parsing
       }
 
-      // Validate and normalize trace data
-      const validTraces = parsedData.filter(trace => 
-        trace.id && trace.timestamp && trace.conversation
-      );
+      // Simulate API call
+      await mockApiCall('/api/evaluations/upload');
+      
+      // Add parsed data to existing traces
+      setTraces(prevTraces => [...prevTraces, ...parsedData]);
+      
+      // Update filter options with new data
+      const allTraces = [...traces, ...parsedData];
+      const tools = Array.from(new Set(allTraces.map(t => t.tool)));
+      const scenarios = Array.from(new Set(allTraces.map(t => t.scenario)));
+      
+      setFilterOptions({
+        tools: ['All Tools', ...tools],
+        scenarios: ['All Scenarios', ...scenarios],
+        statuses: ['All Status', 'pending', 'accepted', 'rejected'],
+        dataSources: ['All Sources', 'human', 'synthetic']
+      });
 
-      if (validTraces.length > 0) {
-        // Update traces and rebuild filter options
-        setTraces(prev => [...prev, ...validTraces]);
-        
-        // Rebuild filter options with new data
-        const allTraces = [...traces, ...validTraces];
-        const tools = Array.from(new Set(allTraces.map(t => t.tool).filter(Boolean))) as string[];
-        const scenarios = Array.from(new Set(allTraces.map(t => t.scenario).filter(Boolean))) as string[];
-        
-        setFilterOptions({
-          tools: ['All Tools', ...tools],
-          scenarios: ['All Scenarios', ...scenarios],
-          statuses: ['All Status', 'Pending', 'Accepted', 'Rejected'],
-          dataSources: ['All Sources', 'Human', 'Synthetic']
-        });
-
-        setUploadProgress(100);
-        setTimeout(() => {
-          setIsUploading(false);
-          setShowUploadModal(false);
-          setUploadFile(null);
-          setUploadProgress(0);
-        }, 500);
-      } else {
-        setUploadError('No valid trace data found in file');
+      if (progressInterval) clearInterval(progressInterval);
+      setUploadProgress(100);
+      
+      // Close modal after success
+      setTimeout(() => {
+        setShowUploadModal(false);
+        setUploadFile(null);
+        setUploadProgress(0);
         setIsUploading(false);
-      }
+      }, 1000);
+
     } catch {
-      setUploadError('Failed to parse file. Please check format and try again.');
+      setUploadError('Upload failed. Please try again.');
       setIsUploading(false);
+      if (progressInterval) clearInterval(progressInterval);
     }
   };
 
@@ -449,7 +518,11 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-gray-900">Trace Records</h3>
             
-            {filteredTraces.length > 0 ? (
+            {isLoading ? (
+              <div className="p-8 text-center bg-white rounded-lg border">
+                <div className="text-gray-500">Loading traces...</div>
+              </div>
+            ) : filteredTraces.length > 0 ? (
               <div className="space-y-3">
                 {filteredTraces.map((trace) => (
                   <div

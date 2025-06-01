@@ -2,17 +2,17 @@
 API endpoints for trace management.
 """
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.security import get_current_user_email
-from ..database.connection import get_db
-from ..services.trace_logger import trace_logger
+from auth.security import get_current_user_email
+from database.connection import get_db
+from services.trace_logger import trace_logger
 
 
 router = APIRouter()
