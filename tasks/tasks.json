@@ -140,12 +140,69 @@
       "description": "Build LLM-powered automatic evaluation system for scaling quality assessment",
       "details": "Integrate multiple evaluator models (OpenAI, Anthropic, local models), create pre-built evaluation prompt templates, implement scoring calibration to align with human judgment, and build batch processing capabilities for thousands of traces.",
       "testStrategy": "",
-      "status": "pending",
+      "status": "in-progress",
       "dependencies": [
         4
       ],
       "priority": "medium",
-      "subtasks": []
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Integrate Multiple Evaluator Models",
+          "description": "Implement integration with OpenAI, Anthropic, and local models for evaluation",
+          "dependencies": [],
+          "details": "Develop API connectors for OpenAI and Anthropic, create interfaces for local model integration, implement model selection logic, and ensure proper error handling and fallback mechanisms\n<info added on 2025-06-01T03:05:05.466Z>\nSuccessfully implemented comprehensive model-based evaluation engine with multiple evaluator integrations:\n\nCore Implementation:\n- Developed Evaluator Models Service (evaluator_models.py) with BaseEvaluator abstract class, OpenAIEvaluator, AnthropicEvaluator, LocalEvaluator placeholder, and EvaluatorManager\n- Implemented support for 9 standard evaluation criteria\n- Added intelligent score extraction, cost estimation and tracking, error handling, and parallel processing capabilities\n\nAPI Integration:\n- Created new endpoints for evaluator information, single trace evaluation, and batch evaluation\n- Implemented automatic database storage of results, custom evaluation prompts, configurable parallel workers, and comprehensive error handling\n\nTechnical Achievements:\n- Integrated support for OpenAI (GPT-4, GPT-3.5-turbo) and Anthropic (Claude-3-sonnet, Claude-3-haiku) models\n- Implemented performance optimizations including async/await operations, intelligent evaluator selection, and batch processing with configurable parallelism\n\nBackend Status: All code loads successfully, ready for evaluation template implementation\n</info added on 2025-06-01T03:05:05.466Z>",
+          "status": "done",
+          "testStrategy": "Unit tests for each model integration, integration tests for model selection logic"
+        },
+        {
+          "id": 2,
+          "title": "Create Pre-built Evaluation Prompt Templates",
+          "description": "Design and implement a library of evaluation prompt templates for various assessment criteria",
+          "dependencies": [
+            1
+          ],
+          "details": "Develop templates for coherence, relevance, factual accuracy, grammar, and style evaluation. Create a flexible template system allowing for easy customization and extension\n<info added on 2025-06-01T03:21:52.096Z>\nSuccessfully implemented comprehensive evaluation prompt templates system, including:\n\n1. Core Template Library:\n   - Created Evaluation Templates Service with 5 research-backed templates (Coherence, Relevance, Factual Accuracy, Grammar, Helpfulness)\n   - Implemented flexible variable system, template categorization, rendering with smart substitution, and validation\n\n2. Integration with Evaluator Models:\n   - Updated BaseEvaluator to use template library\n   - Integrated template rendering into OpenAI and Anthropic evaluators\n   - Implemented automatic template selection and graceful fallback\n\n3. API Endpoints Added:\n   - GET /model-evaluation/templates (list templates)\n   - GET /model-evaluation/templates/{id} (get specific template)\n   - POST /model-evaluation/templates/{id}/render (render template)\n\n4. Technical Achievements:\n   - Developed comprehensive templates with weighted evaluation dimensions\n   - Created modular, extensible template system\n   - Integrated templates with existing evaluator infrastructure\n\nSystem is now ready for scoring calibration implementation.\n</info added on 2025-06-01T03:21:52.096Z>",
+          "status": "done",
+          "testStrategy": "Validate templates with sample inputs, conduct user testing for template effectiveness"
+        },
+        {
+          "id": 3,
+          "title": "Implement Scoring Calibration System",
+          "description": "Develop a system to calibrate model-generated scores with human judgment",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Create a dataset of human-scored samples, implement machine learning algorithms for score adjustment, develop a feedback loop for continuous calibration improvement\n<info added on 2025-06-01T03:25:35.665Z>\nSuccessfully implemented a comprehensive scoring calibration system with the following key components:\n\n1. Scoring Calibration Service (scoring_calibration.py):\n   - Multiple ML algorithms: Linear Regression, Polynomial Regression, Isotonic Regression, Beta Calibration, and Platt Scaling\n   - Fallback to simple linear calibration when sklearn is unavailable\n   - Data structures: HumanScore, CalibrationDataPoint, CalibrationModel, CalibrationResult\n   - Automatic model training with configurable thresholds\n\n2. Machine Learning Features:\n   - Performance metrics (MSE, MAE, R², cross-validation)\n   - Automatic model retraining\n   - Confidence adjustment based on model performance\n   - Persistent storage with JSON and pickle serialization\n\n3. Enhanced Evaluator Manager:\n   - Added evaluate_single_with_calibration() method\n   - Automatic score calibration with confidence adjustment\n   - Calibration metadata tracking in evaluation results\n\n4. Calibration Pipeline:\n   - Human score collection, data point creation, model training, and score calibration\n   - Automatic pairing of AI and human evaluations for training data\n   - Continuous learning with periodic model retraining\n\n5. API Endpoints for Calibration Management:\n   - Add human evaluation scores\n   - Get calibration system statistics\n   - Train calibration models manually\n   - Calibrate individual scores\n   - Full evaluation with calibration\n\n6. Technical Achievements:\n   - Multiple regression methods with cross-validation\n   - Performance metrics tracking and confidence adjustment\n   - Persistent storage with file-based data management\n   - Comprehensive error handling, logging, and graceful degradation\n\nThe calibration system is fully integrated with evaluators and ready for batch processing implementation.\n</info added on 2025-06-01T03:25:35.665Z>",
+          "status": "done",
+          "testStrategy": "Compare calibrated scores with human scores using statistical measures, conduct periodic recalibration tests"
+        },
+        {
+          "id": 4,
+          "title": "Build Batch Processing Capabilities",
+          "description": "Implement a scalable system for processing thousands of traces simultaneously",
+          "dependencies": [
+            1,
+            2,
+            3
+          ],
+          "details": "Design a queue-based processing system, implement parallel processing capabilities, optimize for resource utilization, and include progress tracking and error recovery mechanisms",
+          "status": "pending",
+          "testStrategy": "Performance testing with large datasets, stress testing for system stability"
+        },
+        {
+          "id": 5,
+          "title": "Develop Reporting and Analytics Dashboard",
+          "description": "Create a comprehensive dashboard for visualizing evaluation results and analytics",
+          "dependencies": [
+            4
+          ],
+          "details": "Implement data aggregation and analysis tools, design interactive visualizations for evaluation metrics, create customizable reports, and include export functionality for further analysis",
+          "status": "pending",
+          "testStrategy": "User acceptance testing for dashboard functionality, validate data accuracy and consistency"
+        }
+      ]
     },
     {
       "id": 7,

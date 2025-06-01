@@ -23,6 +23,13 @@ from database.connection import get_db
 from database.models import Evaluation, Trace, User, EvaluationStatus, TraceTag, FilterPreset
 from services.taxonomy_builder import taxonomy_builder
 from services.cache_manager import get_cache_manager, cache_filter_results, get_cached_filter_results
+from services.evaluator_models import (
+    evaluator_manager, 
+    EvaluationRequest as ModelEvaluationRequest,
+    EvaluationResult as ModelEvaluationResult,
+    EvaluationCriteria,
+    BatchEvaluationResult
+)
 
 
 router = APIRouter()
@@ -1269,4 +1276,723 @@ async def optimize_database_performance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to optimize database: {str(e)}"
+        )
+
+
+# Model-based evaluation schemas
+class ModelEvaluationRequestSchema(BaseModel):
+    """Schema for requesting model-based evaluation."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    trace_id: str = Field(..., description="ID of the trace to evaluate")
+    user_input: str = Field(..., description="Original user input")
+    model_output: str = Field(..., description="AI model's response to evaluate")
+    system_prompt: Optional[str] = Field(None, description="System prompt used")
+    context: Optional[Dict[str, Any]] = Field(None, description="Additional context")
+    criteria: List[str] = Field(default=["coherence", "relevance"], description="Evaluation criteria")
+    custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
+    reference_answer: Optional[str] = Field(None, description="Reference answer for comparison")
+    evaluator_model: Optional[str] = Field(None, description="Specific evaluator model to use")
+    use_calibration: bool = Field(default=True, description="Whether to apply score calibration")
+
+
+class ModelEvaluationResponse(BaseModel):
+    """Schema for model-based evaluation response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    trace_id: str
+    evaluator_model: str
+    criteria: str
+    score: float
+    reasoning: str
+    confidence: float
+    evaluation_time_ms: int
+    cost_usd: Optional[float]
+    metadata: Dict[str, Any]
+
+
+class BatchEvaluationRequest(BaseModel):
+    """Schema for batch evaluation request."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    trace_ids: List[str] = Field(..., description="List of trace IDs to evaluate")
+    criteria: List[str] = Field(..., description="Evaluation criteria to assess")
+    evaluator_model: Optional[str] = Field(None, description="Specific evaluator model to use")
+    custom_prompt: Optional[str] = Field(None, description="Custom evaluation prompt")
+    parallel_workers: int = Field(5, ge=1, le=20, description="Number of parallel evaluation workers")
+
+
+class BatchEvaluationResponse(BaseModel):
+    """Schema for batch evaluation response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    total_traces: int
+    successful_evaluations: int
+    failed_evaluations: int
+    results: List[ModelEvaluationResponse]
+    errors: List[Dict[str, Any]]
+    total_time_ms: int
+    total_cost_usd: float
+
+
+class AvailableEvaluatorsResponse(BaseModel):
+    """Schema for available evaluators response."""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    available_evaluators: List[str]
+    cost_estimates: Dict[str, Dict[str, float]]
+    evaluation_criteria: List[str]
+
+
+# Model-based evaluation endpoints
+
+@router.get("/model-evaluation/evaluators", response_model=AvailableEvaluatorsResponse)
+async def get_available_evaluators(
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Get list of available model evaluators and their capabilities.
+    """
+    try:
+        available_evaluators = await evaluator_manager.get_available_evaluators()
+        cost_estimates = await evaluator_manager.get_cost_estimates()
+        
+        # Get available evaluation criteria
+        criteria_list = [criteria.value for criteria in EvaluationCriteria]
+        
+        return AvailableEvaluatorsResponse(
+            available_evaluators=available_evaluators,
+            cost_estimates=cost_estimates,
+            evaluation_criteria=criteria_list
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get available evaluators: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/evaluate", response_model=List[ModelEvaluationResponse])
+async def evaluate_trace_with_model(
+    request: ModelEvaluationRequestSchema,
+    current_user: str = Depends(get_current_user_email),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Evaluate a single trace using model-based evaluation.
+    Supports multiple criteria and evaluator selection.
+    """
+    try:
+        # Get the trace from database
+        trace_query = select(Trace).where(Trace.id == request.trace_id)
+        result = await session.execute(trace_query)
+        trace = result.scalar_one_or_none()
+        
+        if not trace:
+            raise HTTPException(status_code=404, detail=f"Trace {request.trace_id} not found")
+        
+        # Convert criteria strings to EvaluationCriteria enums
+        criteria_enums = []
+        for criteria_str in request.criteria:
+            try:
+                criteria_enums.append(EvaluationCriteria(criteria_str))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Invalid criteria: {criteria_str}. Available: {[c.value for c in EvaluationCriteria]}"
+                )
+        
+        # Create evaluation request
+        eval_request = ModelEvaluationRequest(
+            trace_id=request.trace_id,
+            user_input=request.user_input,
+            model_output=request.model_output,
+            system_prompt=request.system_prompt,
+            context=request.context,
+            criteria=criteria_enums,
+            custom_prompt=request.custom_prompt,
+            reference_answer=request.reference_answer
+        )
+        
+        # Perform evaluation for each criteria
+        evaluation_results = await evaluator_manager.evaluate_multiple_criteria(
+            eval_request,
+            criteria_enums,
+            request.evaluator_model
+        )
+        
+        # Convert results to response format
+        response_results = []
+        for result in evaluation_results:
+            response_results.append(ModelEvaluationResponse(
+                trace_id=result.trace_id,
+                evaluator_model=result.evaluator_model,
+                criteria=result.criteria.value,
+                score=result.score,
+                reasoning=result.reasoning,
+                confidence=result.confidence,
+                evaluation_time_ms=result.evaluation_time_ms or 0,
+                cost_usd=result.cost_usd,
+                metadata=result.metadata
+            ))
+        
+        # Store evaluation results in database
+        for result in evaluation_results:
+            evaluation = Evaluation(
+                trace_id=trace.id,
+                evaluator_type="model",
+                score=result.score,
+                label=f"model_score_{result.score:.2f}",
+                critique=result.reasoning,
+                eval_metadata={
+                    "evaluator_model": result.evaluator_model,
+                    "criteria": result.criteria.value,
+                    "confidence": result.confidence,
+                    "evaluation_time_ms": result.evaluation_time_ms,
+                    "cost_usd": result.cost_usd,
+                    **result.metadata
+                }
+            )
+            session.add(evaluation)
+        
+        await session.commit()
+        
+        return response_results
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to evaluate trace: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/batch", response_model=BatchEvaluationResponse)
+async def batch_evaluate_traces(
+    request: BatchEvaluationRequest,
+    current_user: str = Depends(get_current_user_email),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Evaluate multiple traces in batch using model-based evaluation.
+    Supports parallel processing for improved performance.
+    """
+    try:
+        start_time = time.time()
+        
+        # Validate trace IDs exist
+        traces_query = select(Trace).where(Trace.id.in_(request.trace_ids))
+        result = await session.execute(traces_query)
+        traces = result.scalars().all()
+        
+        if len(traces) != len(request.trace_ids):
+            found_ids = {str(trace.id) for trace in traces}
+            missing_ids = set(request.trace_ids) - found_ids
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Traces not found: {list(missing_ids)}"
+            )
+        
+        # Convert criteria strings to enums
+        criteria_enums = []
+        for criteria_str in request.criteria:
+            try:
+                criteria_enums.append(EvaluationCriteria(criteria_str))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid criteria: {criteria_str}"
+                )
+        
+        # Create evaluation requests
+        eval_requests = []
+        for trace in traces:
+            eval_request = ModelEvaluationRequest(
+                trace_id=str(trace.id),
+                user_input=trace.user_input,
+                model_output=trace.model_output,
+                system_prompt=trace.system_prompt,
+                context=trace.context,
+                criteria=criteria_enums,
+                custom_prompt=request.custom_prompt
+            )
+            eval_requests.append(eval_request)
+        
+        # Perform batch evaluation with parallel processing
+        all_results = []
+        errors = []
+        
+        async def evaluate_trace_batch(eval_request):
+            try:
+                results = await evaluator_manager.evaluate_multiple_criteria(
+                    eval_request,
+                    criteria_enums,
+                    request.evaluator_model
+                )
+                return results
+            except Exception as e:
+                errors.append({
+                    "trace_id": eval_request.trace_id,
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return []
+        
+        # Process in batches to avoid overwhelming the API
+        batch_size = request.parallel_workers
+        for i in range(0, len(eval_requests), batch_size):
+            batch = eval_requests[i:i + batch_size]
+            tasks = [evaluate_trace_batch(req) for req in batch]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for results in batch_results:
+                if isinstance(results, list):
+                    all_results.extend(results)
+        
+        # Convert results to response format
+        response_results = []
+        total_cost = 0.0
+        
+        for result in all_results:
+            response_results.append(ModelEvaluationResponse(
+                trace_id=result.trace_id,
+                evaluator_model=result.evaluator_model,
+                criteria=result.criteria.value,
+                score=result.score,
+                reasoning=result.reasoning,
+                confidence=result.confidence,
+                evaluation_time_ms=result.evaluation_time_ms or 0,
+                cost_usd=result.cost_usd,
+                metadata=result.metadata
+            ))
+            
+            if result.cost_usd:
+                total_cost += result.cost_usd
+        
+        # Store evaluation results in database
+        for result in all_results:
+            evaluation = Evaluation(
+                trace_id=result.trace_id,
+                evaluator_type="model",
+                score=result.score,
+                label=f"model_score_{result.score:.2f}",
+                critique=result.reasoning,
+                eval_metadata={
+                    "evaluator_model": result.evaluator_model,
+                    "criteria": result.criteria.value,
+                    "confidence": result.confidence,
+                    "evaluation_time_ms": result.evaluation_time_ms,
+                    "cost_usd": result.cost_usd,
+                    **result.metadata
+                }
+            )
+            session.add(evaluation)
+        
+        await session.commit()
+        
+        total_time = int((time.time() - start_time) * 1000)
+        
+        return BatchEvaluationResponse(
+            total_traces=len(request.trace_ids),
+            successful_evaluations=len(all_results),
+            failed_evaluations=len(errors),
+            results=response_results,
+            errors=errors,
+            total_time_ms=total_time,
+            total_cost_usd=total_cost
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to perform batch evaluation: {str(e)}"
+        )
+
+
+# Evaluation template management endpoints
+
+@router.get("/model-evaluation/templates")
+async def list_evaluation_templates(
+    category: Optional[str] = Query(None, description="Filter by template category"),
+    criteria: Optional[str] = Query(None, description="Filter by evaluation criteria"),
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    List available evaluation templates.
+    Supports filtering by category and criteria.
+    """
+    try:
+        from services.evaluation_templates import template_library, TemplateCategory
+        
+        templates = template_library.list_all_templates()
+        
+        # Apply filters
+        if criteria:
+            try:
+                criteria_enum = EvaluationCriteria(criteria)
+                templates = [t for t in templates if t.criteria == criteria_enum]
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid criteria: {criteria}")
+        
+        if category:
+            try:
+                category_enum = TemplateCategory(category)
+                category_templates = template_library.get_templates_by_category(category_enum)
+                template_ids = {t.id for t in category_templates}
+                templates = [t for t in templates if t.id in template_ids]
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+        
+        # Convert to response format
+        template_list = []
+        for template in templates:
+            template_list.append({
+                "id": template.id,
+                "name": template.name,
+                "description": template.description,
+                "criteria": template.criteria.value,
+                "version": template.version,
+                "created_at": template.created_at,
+                "tags": template.tags,
+                "variables": [
+                    {
+                        "name": var.name,
+                        "description": var.description,
+                        "required": var.required,
+                        "default_value": var.default_value
+                    }
+                    for var in template.variables
+                ],
+                "examples": template.examples
+            })
+        
+        return {
+            "templates": template_list,
+            "total_count": len(template_list),
+            "available_criteria": [criteria.value for criteria in EvaluationCriteria],
+            "available_categories": [cat.value for cat in TemplateCategory]
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list templates: {str(e)}"
+        )
+
+
+@router.get("/model-evaluation/templates/{template_id}")
+async def get_evaluation_template(
+    template_id: str,
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Get a specific evaluation template by ID.
+    """
+    try:
+        from services.evaluation_templates import template_library
+        
+        template = template_library.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        
+        return {
+            "id": template.id,
+            "name": template.name,
+            "description": template.description,
+            "criteria": template.criteria.value,
+            "template_text": template.template_text,
+            "instructions": template.instructions,
+            "version": template.version,
+            "created_at": template.created_at,
+            "tags": template.tags,
+            "variables": [
+                {
+                    "name": var.name,
+                    "description": var.description,
+                    "required": var.required,
+                    "default_value": var.default_value,
+                    "validation_pattern": var.validation_pattern
+                }
+                for var in template.variables
+            ],
+            "examples": template.examples
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get template: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/templates/{template_id}/render")
+async def render_evaluation_template(
+    template_id: str,
+    variables: Dict[str, str],
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Render an evaluation template with provided variables.
+    Returns the complete evaluation prompt ready for use.
+    """
+    try:
+        from services.evaluation_templates import template_library
+        
+        template = template_library.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        
+        # Render the template
+        rendered_prompt = template_library.render_template(template_id, variables)
+        
+        return {
+            "template_id": template_id,
+            "template_name": template.name,
+            "rendered_prompt": rendered_prompt,
+            "variables_used": variables,
+            "criteria": template.criteria.value,
+            "instructions": template.instructions
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to render template: {str(e)}"
+        )
+
+
+# Scoring calibration endpoints
+
+@router.post("/model-evaluation/calibration/human-scores")
+async def add_human_score(
+    human_score_data: Dict[str, Any],
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Add a human evaluation score for calibration training.
+    """
+    try:
+        from services.scoring_calibration import calibration_system, HumanScore
+        
+        # Validate required fields
+        required_fields = ["trace_id", "criteria", "score", "reasoning", "confidence", "evaluation_time_ms"]
+        for field in required_fields:
+            if field not in human_score_data:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+        
+        # Create human score object
+        human_score = HumanScore(
+            trace_id=human_score_data["trace_id"],
+            evaluator_email=current_user,
+            criteria=EvaluationCriteria(human_score_data["criteria"]),
+            score=float(human_score_data["score"]),
+            reasoning=human_score_data["reasoning"],
+            confidence=float(human_score_data["confidence"]),
+            evaluation_time_ms=int(human_score_data["evaluation_time_ms"]),
+            metadata=human_score_data.get("metadata", {})
+        )
+        
+        # Validate score range
+        if not 0.0 <= human_score.score <= 1.0:
+            raise HTTPException(status_code=400, detail="Score must be between 0.0 and 1.0")
+        
+        if not 0.0 <= human_score.confidence <= 1.0:
+            raise HTTPException(status_code=400, detail="Confidence must be between 0.0 and 1.0")
+        
+        # Add to calibration system
+        success = await calibration_system.add_human_score(human_score)
+        
+        if success:
+            return {
+                "message": "Human score added successfully",
+                "trace_id": human_score.trace_id,
+                "criteria": human_score.criteria.value,
+                "score": human_score.score
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add human score")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add human score: {str(e)}"
+        )
+
+
+@router.get("/model-evaluation/calibration/stats")
+async def get_calibration_stats(
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Get calibration system statistics and performance metrics.
+    """
+    try:
+        from services.scoring_calibration import calibration_system
+        
+        stats = await calibration_system.get_calibration_stats()
+        return stats
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get calibration stats: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/calibration/train")
+async def train_calibration_model(
+    training_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Train a calibration model for specific criteria and evaluator.
+    """
+    try:
+        from services.scoring_calibration import calibration_system, CalibrationMethod
+        
+        # Validate required fields
+        if "criteria" not in training_request or "evaluator_model" not in training_request:
+            raise HTTPException(status_code=400, detail="Missing required fields: criteria, evaluator_model")
+        
+        criteria = EvaluationCriteria(training_request["criteria"])
+        evaluator_model = training_request["evaluator_model"]
+        method = CalibrationMethod(training_request.get("method", "isotonic_regression"))
+        
+        # Train the model
+        success = await calibration_system.train_calibration_model(criteria, evaluator_model, method)
+        
+        if success:
+            return {
+                "message": "Calibration model trained successfully",
+                "criteria": criteria.value,
+                "evaluator_model": evaluator_model,
+                "method": method.value
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Insufficient training data or training failed")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to train calibration model: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/calibration/calibrate")
+async def calibrate_score(
+    calibration_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Calibrate an AI-generated score using trained calibration models.
+    """
+    try:
+        from services.scoring_calibration import calibration_system
+        
+        # Validate required fields
+        required_fields = ["ai_score", "criteria", "evaluator_model"]
+        for field in required_fields:
+            if field not in calibration_request:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+        
+        ai_score = float(calibration_request["ai_score"])
+        criteria = EvaluationCriteria(calibration_request["criteria"])
+        evaluator_model = calibration_request["evaluator_model"]
+        confidence = float(calibration_request.get("confidence", 0.8))
+        
+        # Validate score range
+        if not 0.0 <= ai_score <= 1.0:
+            raise HTTPException(status_code=400, detail="AI score must be between 0.0 and 1.0")
+        
+        if not 0.0 <= confidence <= 1.0:
+            raise HTTPException(status_code=400, detail="Confidence must be between 0.0 and 1.0")
+        
+        # Calibrate the score
+        calibration_result = await calibration_system.calibrate_score(
+            ai_score=ai_score,
+            criteria=criteria,
+            evaluator_model=evaluator_model,
+            confidence=confidence
+        )
+        
+        return {
+            "original_score": calibration_result.original_score,
+            "calibrated_score": calibration_result.calibrated_score,
+            "confidence_adjustment": calibration_result.confidence_adjustment,
+            "calibration_method": calibration_result.calibration_method.value,
+            "model_version": calibration_result.model_version,
+            "metadata": calibration_result.metadata
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calibrate score: {str(e)}"
+        )
+
+
+@router.post("/model-evaluation/evaluate-with-calibration")
+async def evaluate_with_calibration(
+    evaluation_request: ModelEvaluationRequestSchema,
+    current_user: str = Depends(get_current_user_email)
+):
+    """
+    Evaluate a trace using AI models with automatic score calibration.
+    """
+    try:
+        from services.evaluator_models import evaluator_manager, EvaluationRequest as ModelEvaluationRequest
+        
+        # Create evaluation request
+        request = ModelEvaluationRequest(
+            trace_id=evaluation_request.trace_id,
+            user_input=evaluation_request.user_input,
+            model_output=evaluation_request.model_output,
+            system_prompt=evaluation_request.system_prompt,
+            context=evaluation_request.context,
+            criteria=evaluation_request.criteria,
+            custom_prompt=evaluation_request.custom_prompt,
+            reference_answer=evaluation_request.reference_answer
+        )
+        
+        # Evaluate with calibration
+        result = await evaluator_manager.evaluate_single_with_calibration(
+            request=request,
+            evaluator_name=evaluation_request.evaluator_model,
+            use_calibration=evaluation_request.use_calibration
+        )
+        
+        return {
+            "trace_id": result.trace_id,
+            "evaluator_model": result.evaluator_model,
+            "criteria": result.criteria.value,
+            "score": result.score,
+            "reasoning": result.reasoning,
+            "confidence": result.confidence,
+            "evaluation_time_ms": result.evaluation_time_ms,
+            "cost_usd": result.cost_usd,
+            "metadata": result.metadata
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to evaluate with calibration: {str(e)}"
         ) 
