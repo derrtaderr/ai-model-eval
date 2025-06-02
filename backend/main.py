@@ -19,6 +19,15 @@ from api.external import router as external_router
 from api.large_dataset_handler import router as large_dataset_router
 from api.experiments import router as experiments_router
 
+# Performance middleware
+from middleware.performance import (
+    PerformanceMonitoringMiddleware,
+    RateLimitMiddleware,
+    CompressionMiddleware
+)
+from services.cache_service import cache_manager
+from config.performance import get_performance_config
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,6 +36,11 @@ async def lifespan(app: FastAPI):
     try:
         await create_tables()
         print("Database tables created successfully")
+        
+        # Warm up cache
+        cache_manager.warm_up_cache()
+        print("Cache service initialized")
+        
     except Exception as e:
         print(f"Warning: Database initialization failed: {e}")
         print("The API will start but database-dependent features may not work")
@@ -42,6 +56,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Add performance middleware (order matters - compression should be last)
+app.add_middleware(PerformanceMonitoringMiddleware)
+app.add_middleware(RateLimitMiddleware) 
+app.add_middleware(CompressionMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -66,7 +85,11 @@ async def root():
             "Authentication",
             "Database Management",
             "Unit Testing Framework",
-            "Human Evaluation Dashboard"
+            "Human Evaluation Dashboard",
+            "A/B Testing Framework",
+            "Analytics Engine",
+            "Data Export System",
+            "Performance Optimization"
         ]
     }
 
@@ -77,8 +100,61 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "LLM Evaluation Platform API",
-        "timestamp": "2025-01-27T00:00:00Z"
+        "timestamp": "2025-01-27T00:00:00Z",
+        "cache_status": cache_manager.get_cache_stats()["status"],
+        "performance_config": get_performance_config()["optimizations"]
     }
+
+
+@app.get("/metrics")
+async def get_metrics(current_user_email: str = Depends(get_current_user_email)):
+    """Get system performance metrics."""
+    try:
+        # Get cache statistics
+        cache_stats = cache_manager.get_cache_stats()
+        
+        # Get performance configuration
+        perf_config = get_performance_config()
+        
+        return {
+            "cache": cache_stats,
+            "performance": {
+                "targets": {
+                    "api_response_time_ms": perf_config["monitoring"]["api_response_time_target_ms"],
+                    "error_rate_threshold": perf_config["monitoring"]["alert_on_error_rate_threshold"]
+                }
+            },
+            "rate_limits": perf_config["rate_limits"],
+            "optimizations": perf_config["optimizations"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {str(e)}")
+
+
+@app.post("/admin/cache/clear")
+async def clear_cache(current_user_email: str = Depends(get_current_user_email)):
+    """Clear all cache data (admin only)."""
+    try:
+        success = cache_manager.clear_all_cache()
+        return {
+            "message": "Cache cleared successfully" if success else "Failed to clear cache",
+            "success": success
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+
+
+@app.post("/admin/cache/invalidate-stale")
+async def invalidate_stale_cache(current_user_email: str = Depends(get_current_user_email)):
+    """Remove stale cache entries."""
+    try:
+        cleared_count = cache_manager.invalidate_stale_data()
+        return {
+            "message": f"Cleared {cleared_count} stale cache entries",
+            "cleared_count": cleared_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to invalidate stale cache: {str(e)}")
 
 
 @app.get("/protected")

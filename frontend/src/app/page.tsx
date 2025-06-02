@@ -56,10 +56,6 @@ interface FilterOptions {
   dataSources: string[];
 }
 
-// Empty chart data - will be populated from real evaluations
-const agreementData: { date: string; rate: number }[] = [];
-const acceptanceData: { date: string; rate: number }[] = [];
-
 export default function EvaluationDashboard() {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [filters, setFilters] = useState({
@@ -75,6 +71,10 @@ export default function EvaluationDashboard() {
     dataSources: ['All Sources', 'human', 'synthetic']
   });
   const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
+  const [activeTab, setActiveTab] = useState<'chat' | 'functions' | 'metadata'>('chat');
+  const [evaluationNotes, setEvaluationNotes] = useState('');
+  const [showRejectionModal, setShowRejectionModal] = useState(false);
+  const [evaluationFeedback, setEvaluationFeedback] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -151,9 +151,12 @@ export default function EvaluationDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Reset previous errors
+    setUploadError(null);
+
     // Validate file type
-    const allowedTypes = ['application/json', 'text/csv', 'application/vnd.ms-excel'];
-    const allowedExtensions = ['.json', '.csv', '.xlsx'];
+    const allowedTypes = ['application/json', 'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+    const allowedExtensions = ['.json', '.csv', '.xlsx', '.xls'];
     const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
     
     if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
@@ -169,17 +172,24 @@ export default function EvaluationDashboard() {
 
     setUploadFile(file);
     setUploadError(null);
+    console.log('File selected:', file.name, file.type, file.size);
   };
 
   // Process uploaded file
   const processUpload = async () => {
-    if (!uploadFile) return;
+    if (!uploadFile) {
+      setUploadError('Please select a file first');
+      return;
+    }
 
     let progressInterval: NodeJS.Timeout | undefined;
     
     try {
       setIsUploading(true);
       setUploadError(null);
+      setUploadProgress(0);
+      
+      console.log('Starting upload process for:', uploadFile.name);
       
       // Simulate progress
       progressInterval = setInterval(() => {
@@ -187,66 +197,82 @@ export default function EvaluationDashboard() {
       }, 100);
 
       const text = await uploadFile.text();
+      console.log('File content loaded, length:', text.length);
+      
       let parsedData: Trace[] = [];
 
-      if (uploadFile.name.endsWith('.json')) {
+      if (uploadFile.name.toLowerCase().endsWith('.json')) {
         try {
           const jsonData = JSON.parse(text);
+          console.log('JSON parsed successfully:', jsonData);
+          
           // Handle both single trace and array of traces
-          if (Array.isArray(jsonData)) {
-            parsedData = jsonData;
-          } else {
-            parsedData = [jsonData];
-          }
+          const rawTraces = Array.isArray(jsonData) ? jsonData : [jsonData];
+          console.log('Processing traces:', rawTraces.length);
           
           // Validate and ensure each trace has required fields
-          parsedData = (jsonData as Record<string, unknown>[]).map((trace: Record<string, unknown>, index) => ({
-            id: trace.id as string || `uploaded-${Date.now()}-${index}`,
-            timestamp: trace.timestamp as string || new Date().toLocaleString(),
-            tool: trace.tool as string || 'Unknown Tool',
-            scenario: trace.scenario as string || 'Unknown Scenario',
-            status: (trace.status as 'pending' | 'accepted' | 'rejected') || 'pending',
-            modelScore: (trace.modelScore as 'pass' | 'fail') || 'pass',
-            humanScore: (trace.humanScore as 'good' | 'bad' | null) || null,
-            dataSource: (trace.dataSource as 'human' | 'synthetic') || 'human',
-            conversation: {
-              userInput: (trace.conversation as Record<string, unknown>)?.userInput as string || trace.userInput as string || 'No input provided',
-              aiResponse: (trace.conversation as Record<string, unknown>)?.aiResponse as string || trace.aiResponse as string || 'No response provided',
-              systemPrompt: (trace.conversation as Record<string, unknown>)?.systemPrompt as string || trace.systemPrompt as string || 'No system prompt'
-            },
-            functions: ((trace.functions as Record<string, unknown>[]) || []).map((func: Record<string, unknown>) => ({
-              name: func.name as string || 'unknown',
-              parameters: func.parameters as Record<string, unknown> || {},
-              result: func.result as Record<string, unknown> || {},
-              executionTime: func.executionTime as number || 0
-            })),
-            metadata: {
-              modelName: ((trace.metadata as Record<string, unknown>)?.modelName as string) || 'Unknown Model',
-              latencyMs: ((trace.metadata as Record<string, unknown>)?.latencyMs as number) || 0,
-              tokenCount: {
-                input: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.input as number) || 0,
-                output: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.output as number) || 0
+          parsedData = rawTraces.map((trace: Record<string, unknown>, index) => {
+            console.log(`Processing trace ${index}:`, trace);
+            
+            return {
+              id: trace.id as string || `uploaded-${Date.now()}-${index}`,
+              timestamp: trace.timestamp as string || new Date().toLocaleString(),
+              tool: trace.tool as string || 'Unknown Tool',
+              scenario: trace.scenario as string || 'Unknown Scenario',
+              status: (trace.status as 'pending' | 'accepted' | 'rejected') || 'pending',
+              modelScore: (trace.modelScore as 'pass' | 'fail') || 'pass',
+              humanScore: (trace.humanScore as 'good' | 'bad' | null) || null,
+              dataSource: (trace.dataSource as 'human' | 'synthetic') || 'human',
+              conversation: {
+                userInput: (trace.conversation as Record<string, unknown>)?.userInput as string || trace.userInput as string || 'No input provided',
+                aiResponse: (trace.conversation as Record<string, unknown>)?.aiResponse as string || trace.aiResponse as string || 'No response provided',
+                systemPrompt: (trace.conversation as Record<string, unknown>)?.systemPrompt as string || trace.systemPrompt as string || ''
               },
-              costUsd: ((trace.metadata as Record<string, unknown>)?.costUsd as number) || 0,
-              temperature: ((trace.metadata as Record<string, unknown>)?.temperature as number) || 0.7,
-              maxTokens: ((trace.metadata as Record<string, unknown>)?.maxTokens as number) || 1000
-            }
-          }));
+              functions: ((trace.functions as Record<string, unknown>[]) || []).map((func: Record<string, unknown>) => ({
+                name: func.name as string || 'unknown',
+                parameters: func.parameters as Record<string, unknown> || {},
+                result: func.result as Record<string, unknown> || {},
+                executionTime: func.executionTime as number || 0
+              })),
+              metadata: {
+                modelName: ((trace.metadata as Record<string, unknown>)?.modelName as string) || 'Unknown Model',
+                latencyMs: ((trace.metadata as Record<string, unknown>)?.latencyMs as number) || 0,
+                tokenCount: {
+                  input: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.input as number) || 0,
+                  output: (((trace.metadata as Record<string, unknown>)?.tokenCount as Record<string, unknown>)?.output as number) || 0
+                },
+                costUsd: ((trace.metadata as Record<string, unknown>)?.costUsd as number) || 0,
+                temperature: ((trace.metadata as Record<string, unknown>)?.temperature as number) || 0.7,
+                maxTokens: ((trace.metadata as Record<string, unknown>)?.maxTokens as number) || 1000
+              }
+            };
+          });
           
-        } catch {
-          throw new Error('Invalid JSON format');
+        } catch (jsonError) {
+          console.error('JSON parsing error:', jsonError);
+          throw new Error('Invalid JSON format. Please check your file structure.');
         }
-      } else if (uploadFile.name.endsWith('.csv')) {
+      } else if (uploadFile.name.toLowerCase().endsWith('.csv')) {
         // Basic CSV parsing - in production you'd use a proper CSV parser
-        // CSV parsing would be more complex in real implementation
-        parsedData = []; // Placeholder for CSV parsing
+        console.log('CSV file detected, but parsing not implemented yet');
+        setUploadError('CSV parsing is coming soon. Please use JSON format for now.');
+        return;
+      } else {
+        setUploadError('Unsupported file format. Please use JSON or CSV.');
+        return;
       }
+
+      console.log('Parsed data:', parsedData);
 
       // Simulate API call
       await mockApiCall('/api/evaluations/upload');
       
       // Add parsed data to existing traces
-      setTraces(prevTraces => [...prevTraces, ...parsedData]);
+      setTraces(prevTraces => {
+        const newTraces = [...prevTraces, ...parsedData];
+        console.log('Updated traces:', newTraces.length);
+        return newTraces;
+      });
       
       // Update filter options with new data
       const allTraces = [...traces, ...parsedData];
@@ -263,6 +289,8 @@ export default function EvaluationDashboard() {
       if (progressInterval) clearInterval(progressInterval);
       setUploadProgress(100);
       
+      console.log(`Upload successful! Added ${parsedData.length} traces.`);
+      
       // Close modal after success
       setTimeout(() => {
         setShowUploadModal(false);
@@ -271,9 +299,11 @@ export default function EvaluationDashboard() {
         setIsUploading(false);
       }, 1000);
 
-    } catch {
-      setUploadError('Upload failed. Please try again.');
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadError(error instanceof Error ? error.message : 'Upload failed. Please try again.');
       setIsUploading(false);
+      setUploadProgress(0);
       if (progressInterval) clearInterval(progressInterval);
     }
   };
@@ -282,30 +312,66 @@ export default function EvaluationDashboard() {
     setIsDownloading(true);
     
     try {
-      // Simulate API call to generate download
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Check if we have any traces to export
+      if (traces.length === 0) {
+        alert('No trace data available to download. Please upload some data first.');
+        setIsDownloading(false);
+        return;
+      }
       
-      // In real implementation, this would fetch from API:
-      // const response = await fetch('/api/export-labeled-data');
-      // const blob = await response.blob();
+      // Generate CSV header
+      const csvHeader = `trace_id,timestamp,tool,scenario,status,model_score,human_score,data_source,user_input,ai_response,model_name,latency_ms,token_count_input,token_count_output,cost_usd,temperature\n`;
       
-      // Generate mock CSV data
-      const mockData = `trace_id,timestamp,tool,scenario,user_input,ai_response,human_evaluation,evaluator_notes
-trace-001,2025-01-20T10:43:26Z,Listing-Finder,Multiple-Listings,"Find me multiple listings","I found 5 listings...",accepted,"Good response quality"
-trace-002,2025-01-20T09:15:42Z,Email-Draft,Offer-Submission,"Submit offer","Offer submitted successfully",accepted,"Quick and accurate"
-trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Price trend is stable",pending,""`;
-
-      const blob = new Blob([mockData], { type: 'text/csv' });
+      // Convert traces to CSV format
+      const csvRows = traces.map(trace => {
+        // Escape CSV fields that might contain commas or quotes
+        const escapeCSV = (field: string | null | undefined) => {
+          if (field === null || field === undefined) return '';
+          const stringField = String(field);
+          if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
+            return `"${stringField.replace(/"/g, '""')}"`;
+          }
+          return stringField;
+        };
+        
+        return [
+          escapeCSV(trace.id),
+          escapeCSV(trace.timestamp),
+          escapeCSV(trace.tool),
+          escapeCSV(trace.scenario),
+          escapeCSV(trace.status),
+          escapeCSV(trace.modelScore),
+          escapeCSV(trace.humanScore),
+          escapeCSV(trace.dataSource),
+          escapeCSV(trace.conversation.userInput),
+          escapeCSV(trace.conversation.aiResponse),
+          escapeCSV(trace.metadata.modelName),
+          escapeCSV(trace.metadata.latencyMs.toString()),
+          escapeCSV(trace.metadata.tokenCount.input.toString()),
+          escapeCSV(trace.metadata.tokenCount.output.toString()),
+          escapeCSV(trace.metadata.costUsd.toString()),
+          escapeCSV(trace.metadata.temperature.toString())
+        ].join(',');
+      }).join('\n');
+      
+      // Combine header and data
+      const csvContent = csvHeader + csvRows;
+      
+      // Create and download the file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `labeled-data-${new Date().toISOString().split('T')[0]}.csv`;
+      link.download = `llm-evaluation-data-${new Date().toISOString().split('T')[0]}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch {
-      console.error('Download failed');
+      
+      console.log(`Downloaded ${traces.length} traces as CSV`);
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert('Download failed. Please try again.');
     } finally {
       setIsDownloading(false);
     }
@@ -333,11 +399,21 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
     const minRate = Math.min(...data.map(d => d.rate));
     const range = maxRate - minRate || 1;
 
+    // Handle single data point case
+    const getXPosition = (index: number) => {
+      if (data.length === 1) return 150; // Center the single point
+      return (index / (data.length - 1)) * 280 + 10;
+    };
+
+    const getYPosition = (rate: number) => {
+      return 120 - ((rate - minRate) / range) * 100;
+    };
+
     return (
       <div className="bg-white p-6 rounded-lg border">
         <h3 className="text-sm font-medium text-gray-600 mb-4 flex items-center gap-2">
           {title}
-          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }}></div>
         </h3>
         <div className="h-32 relative">
           <div className="absolute left-0 top-0 text-xs text-gray-700">100%</div>
@@ -346,19 +422,24 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
           <div className="absolute left-0 bottom-0 text-xs text-gray-700">0%</div>
           
           <svg className="w-full h-full ml-6" viewBox="0 0 300 120">
-            <polyline
-              fill="none"
-              stroke={color}
-              strokeWidth="2"
-              points={data.map((point, index) => 
-                `${(index / (data.length - 1)) * 280 + 10},${120 - ((point.rate - minRate) / range) * 100}`
-              ).join(' ')}
-            />
+            {/* Only draw line if we have more than one point */}
+            {data.length > 1 && (
+              <polyline
+                fill="none"
+                stroke={color}
+                strokeWidth="2"
+                points={data.map((point, index) => 
+                  `${getXPosition(index)},${getYPosition(point.rate)}`
+                ).join(' ')}
+              />
+            )}
+            
+            {/* Draw circles for each data point */}
             {data.map((point, index) => (
               <circle
                 key={index}
-                cx={(index / (data.length - 1)) * 280 + 10}
-                cy={120 - ((point.rate - minRate) / range) * 100}
+                cx={getXPosition(index)}
+                cy={getYPosition(point.rate)}
                 r="3"
                 fill={color}
               />
@@ -366,9 +447,13 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
           </svg>
           
           <div className="flex justify-between mt-2 ml-6 text-xs text-gray-700">
-            {data.map(point => point.date).map((date, index) => (
-              <span key={index}>{date}</span>
-            ))}
+            {data.length === 1 ? (
+              <div className="w-full text-center">{data[0].date}</div>
+            ) : (
+              data.map((point, index) => (
+                <span key={index}>{point.date}</span>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -410,42 +495,171 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
     );
   };
 
+  // Handle evaluation actions
+  const handleEvaluation = (action: 'accept' | 'reject' | 'review', notes?: string) => {
+    if (!selectedTrace) return;
+
+    // For reject action, show modal first
+    if (action === 'reject') {
+      setShowRejectionModal(true);
+      return;
+    }
+
+    // Update the trace in the traces array
+    setTraces(prevTraces => 
+      prevTraces.map(trace => 
+        trace.id === selectedTrace.id 
+          ? { 
+              ...trace, 
+              status: action === 'accept' ? 'accepted' : 'pending',
+              humanScore: action === 'accept' ? 'good' : null
+            }
+          : trace
+      )
+    );
+
+    // Update selected trace
+    setSelectedTrace(prev => prev ? {
+      ...prev,
+      status: action === 'accept' ? 'accepted' : 'pending',
+      humanScore: action === 'accept' ? 'good' : null
+    } : null);
+
+    // Show feedback
+    const actionText = action === 'accept' ? 'accepted' : 'marked for review';
+    setEvaluationFeedback(`Trace ${selectedTrace.id} has been ${actionText}`);
+    
+    // Clear feedback after 3 seconds
+    setTimeout(() => setEvaluationFeedback(null), 3000);
+
+    // Clear notes after evaluation
+    setEvaluationNotes('');
+
+    console.log(`Evaluated trace ${selectedTrace.id} as ${action}`, notes ? `with notes: ${notes}` : '');
+  };
+
+  const handleRejectionSubmit = (reason: string) => {
+    if (!selectedTrace) return;
+
+    // Update the trace with rejection
+    setTraces(prevTraces => 
+      prevTraces.map(trace => 
+        trace.id === selectedTrace.id 
+          ? { 
+              ...trace, 
+              status: 'rejected',
+              humanScore: 'bad'
+            }
+          : trace
+      )
+    );
+
+    // Update selected trace
+    setSelectedTrace(prev => prev ? {
+      ...prev,
+      status: 'rejected',
+      humanScore: 'bad'
+    } : null);
+
+    // Show feedback
+    setEvaluationFeedback(`Trace ${selectedTrace.id} has been rejected: ${reason}`);
+    
+    // Clear feedback after 3 seconds
+    setTimeout(() => setEvaluationFeedback(null), 3000);
+
+    setShowRejectionModal(false);
+    console.log(`Rejected trace ${selectedTrace.id} with reason: ${reason}`);
+  };
+
+  // Calculate real chart data from traces
+  const calculateChartData = useCallback(() => {
+    if (traces.length === 0) return { agreementData: [], acceptanceData: [] };
+
+    // Calculate agreement rate (how often human and model scores agree)
+    const tracesWithHumanScores = traces.filter(t => t.humanScore !== null);
+    const agreementRate = tracesWithHumanScores.length > 0 
+      ? (tracesWithHumanScores.filter(t => 
+          (t.modelScore === 'pass' && t.humanScore === 'good') ||
+          (t.modelScore === 'fail' && t.humanScore === 'bad')
+        ).length / tracesWithHumanScores.length) * 100
+      : 0;
+
+    // Calculate human acceptance rate
+    const acceptanceRate = tracesWithHumanScores.length > 0
+      ? (tracesWithHumanScores.filter(t => t.humanScore === 'good').length / tracesWithHumanScores.length) * 100
+      : 0;
+
+    // Generate simple data points (in a real app, this would be time-series data)
+    const today = new Date().toLocaleDateString();
+    
+    return {
+      agreementData: [{ date: today, rate: agreementRate }],
+      acceptanceData: [{ date: today, rate: acceptanceRate }]
+    };
+  }, [traces]);
+
+  const { agreementData, acceptanceData } = calculateChartData();
+
+  // Navigation functions for trace details
+  const getCurrentTraceIndex = () => {
+    if (!selectedTrace) return -1;
+    return filteredTraces.findIndex(trace => trace.id === selectedTrace.id);
+  };
+
+  const navigateToTrace = (direction: 'prev' | 'next') => {
+    const currentIndex = getCurrentTraceIndex();
+    if (currentIndex === -1) return;
+
+    let newIndex;
+    if (direction === 'prev') {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : filteredTraces.length - 1;
+    } else {
+      newIndex = currentIndex < filteredTraces.length - 1 ? currentIndex + 1 : 0;
+    }
+
+    setSelectedTrace(filteredTraces[newIndex]);
+    setActiveTab('chat');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">LLM Evaluation Dashboard</h1>
-              <p className="text-sm text-gray-600">Three-tier evaluation system for LLM-powered products</p>
+          <div className="flex items-center justify-between h-20">
+            <div className="flex-1">
+              <h1 className="text-2xl font-bold text-gray-900">LLM Evaluation Dashboard</h1>
+              <p className="text-sm text-gray-600 mt-1">Trace management and human evaluation interface. Visit Analytics Dashboard for detailed metrics and insights.</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4 ml-8">
               {/* Analytics Dashboard Link */}
               <a 
                 href="/analytics"
-                className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-purple-700 transition-colors"
+                className="bg-purple-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-purple-700 transition-colors font-medium"
+                title="Advanced analytics with detailed metrics, trends, and system health monitoring"
               >
-                <BarChart3 className="w-4 h-4" />
+                <BarChart3 className="w-5 h-5" />
                 Analytics Dashboard
               </a>
 
               {/* Upload Data Button */}
               <button 
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors"
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors font-medium"
                 onClick={() => setShowUploadModal(true)}
+                title="Upload trace data in JSON or CSV format"
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-5 h-5" />
                 Upload Data
               </button>
 
               {/* Download Labeled Data Button */}
               <button 
-                className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-green-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                 onClick={downloadLabeledData}
                 disabled={isDownloading}
+                title="Download evaluation results as CSV"
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-5 h-5" />
                 {isDownloading ? 'Downloading...' : 'Download Labeled Data'}
               </button>
             </div>
@@ -533,7 +747,10 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                         ? 'border-blue-500 bg-blue-50' 
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
-                    onClick={() => setSelectedTrace(trace)}
+                    onClick={() => {
+                      setSelectedTrace(trace);
+                      setActiveTab('chat');
+                    }}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
@@ -573,16 +790,24 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
             <div className="p-4 border-b">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">
-                  Record {selectedTrace ? '1' : '0'} of {filteredTraces.length}
+                  Record {getCurrentTraceIndex() + 1} of {filteredTraces.length}
                 </span>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <button className="p-1 border rounded hover:bg-gray-50">
+                    <button 
+                      className="p-1 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => navigateToTrace('prev')}
+                      disabled={filteredTraces.length <= 1}
+                    >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <span className="text-sm text-gray-600">Previous</span>
                     <span className="text-sm text-gray-600">Next</span>
-                    <button className="p-1 border rounded hover:bg-gray-50">
+                    <button 
+                      className="p-1 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => navigateToTrace('next')}
+                      disabled={filteredTraces.length <= 1}
+                    >
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
@@ -596,9 +821,10 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                 {(['chat', 'functions', 'metadata'] as const).map((tab) => (
                   <button
                     key={tab}
-                    onClick={() => setSelectedTrace(null)}
+                    onClick={() => setActiveTab(tab)}
                     className={`px-6 py-3 text-sm font-medium border-b-2 capitalize ${
-                      selectedTrace ? 'border-transparent text-gray-500 hover:text-gray-700'
+                      activeTab === tab 
+                        ? 'border-blue-500 text-blue-600' 
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                   >
@@ -612,7 +838,7 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
             <div className="p-6">
               {selectedTrace ? (
                 <div className="space-y-6">
-                  {/* Trace Overview */}
+                  {/* Trace Overview - Always visible */}
                   <div className="grid grid-cols-2 gap-4 text-sm border-b pb-4">
                     <div>
                       <span className="text-gray-600">Trace ID:</span>
@@ -632,55 +858,213 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                     </div>
                   </div>
 
-                  {/* Tab Content */}
-                  {selectedTrace.conversation.systemPrompt && (
-                    <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
-                      <div className="flex items-center gap-2 text-sm text-yellow-800 font-medium mb-2">
-                        <AlertCircle className="w-4 h-4" />
-                        System Prompt
-                      </div>
-                      <div className="text-sm text-yellow-700">
-                        {selectedTrace.conversation.systemPrompt}
+                  {/* Tab-specific Content */}
+                  {activeTab === 'chat' && (
+                    <div className="space-y-4">
+                      {/* System Prompt */}
+                      {selectedTrace.conversation.systemPrompt && (
+                        <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
+                          <div className="flex items-center gap-2 text-sm text-yellow-800 font-medium mb-2">
+                            <AlertCircle className="w-4 h-4" />
+                            System Prompt
+                          </div>
+                          <div className="text-sm text-yellow-700 whitespace-pre-wrap">
+                            {selectedTrace.conversation.systemPrompt}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Conversation */}
+                      <div className="space-y-4">
+                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                          <div className="flex items-center gap-2 text-sm text-blue-800 font-medium mb-2">
+                            <User className="w-4 h-4" />
+                            User Input
+                          </div>
+                          <div className="text-sm text-blue-700 whitespace-pre-wrap">
+                            {selectedTrace.conversation.userInput}
+                          </div>
+                        </div>
+                        
+                        <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                          <div className="flex items-center gap-2 text-sm text-gray-800 font-medium mb-2">
+                            <Bot className="w-4 h-4" />
+                            AI Response
+                          </div>
+                          <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                            {selectedTrace.conversation.aiResponse}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Conversation */}
-                  <div className="space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                      <div className="flex items-center gap-2 text-sm text-blue-800 font-medium mb-2">
-                        <User className="w-4 h-4" />
-                        User Input
-                      </div>
-                      <div className="text-sm text-blue-700 whitespace-pre-wrap">
-                        {selectedTrace.conversation.userInput}
-                      </div>
+                  {activeTab === 'functions' && (
+                    <div className="space-y-4">
+                      {selectedTrace.functions && selectedTrace.functions.length > 0 ? (
+                        selectedTrace.functions.map((func, index) => (
+                          <div key={index} className="bg-purple-50 border border-purple-200 p-4 rounded-lg">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-medium text-purple-900">{func.name}</h4>
+                              <span className="text-xs text-purple-600 bg-purple-100 px-2 py-1 rounded">
+                                {func.executionTime}ms
+                              </span>
+                            </div>
+                            
+                            <div className="space-y-3 text-sm">
+                              <div>
+                                <span className="font-medium text-purple-800">Parameters:</span>
+                                <pre className="mt-1 bg-purple-100 p-2 rounded text-xs overflow-x-auto">
+                                  {JSON.stringify(func.parameters, null, 2)}
+                                </pre>
+                              </div>
+                              
+                              <div>
+                                <span className="font-medium text-purple-800">Result:</span>
+                                <pre className="mt-1 bg-purple-100 p-2 rounded text-xs overflow-x-auto">
+                                  {JSON.stringify(func.result, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <div className="text-sm">No function calls in this trace</div>
+                        </div>
+                      )}
                     </div>
-                    
-                    <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                      <div className="flex items-center gap-2 text-sm text-gray-800 font-medium mb-2">
-                        <Bot className="w-4 h-4" />
-                        AI Response
-                      </div>
-                      <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                        {selectedTrace.conversation.aiResponse}
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
-                  {/* Evaluation Controls */}
-                  <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                  {activeTab === 'metadata' && (
+                    <div className="space-y-4">
+                      {/* Model Information */}
+                      <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-lg">
+                        <h4 className="text-sm font-medium text-indigo-900 mb-3">Model Information</h4>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-indigo-700 font-medium">Model:</span>
+                            <span className="ml-2 text-indigo-800">{selectedTrace.metadata.modelName}</span>
+                          </div>
+                          <div>
+                            <span className="text-indigo-700 font-medium">Temperature:</span>
+                            <span className="ml-2 text-indigo-800">{selectedTrace.metadata.temperature}</span>
+                          </div>
+                          <div>
+                            <span className="text-indigo-700 font-medium">Max Tokens:</span>
+                            <span className="ml-2 text-indigo-800">{selectedTrace.metadata.maxTokens}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Performance Metrics */}
+                      <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+                        <h4 className="text-sm font-medium text-green-900 mb-3">Performance Metrics</h4>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-green-700 font-medium">Latency:</span>
+                            <span className="ml-2 text-green-800">{selectedTrace.metadata.latencyMs}ms</span>
+                          </div>
+                          <div>
+                            <span className="text-green-700 font-medium">Cost:</span>
+                            <span className="ml-2 text-green-800">${selectedTrace.metadata.costUsd.toFixed(4)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Token Usage */}
+                      <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                        <h4 className="text-sm font-medium text-orange-900 mb-3">Token Usage</h4>
+                        <div className="grid grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <span className="text-orange-700 font-medium">Input:</span>
+                            <span className="ml-2 text-orange-800">{selectedTrace.metadata.tokenCount.input}</span>
+                          </div>
+                          <div>
+                            <span className="text-orange-700 font-medium">Output:</span>
+                            <span className="ml-2 text-orange-800">{selectedTrace.metadata.tokenCount.output}</span>
+                          </div>
+                          <div>
+                            <span className="text-orange-700 font-medium">Total:</span>
+                            <span className="ml-2 text-orange-800 font-semibold">
+                              {selectedTrace.metadata.tokenCount.input + selectedTrace.metadata.tokenCount.output}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status Information */}
+                      <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                        <h4 className="text-sm font-medium text-gray-900 mb-3">Evaluation Status</h4>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-gray-700 font-medium">Model Score:</span>
+                            <span className={`ml-2 px-2 py-1 rounded text-xs ${
+                              selectedTrace.modelScore === 'pass' 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {selectedTrace.modelScore}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-700 font-medium">Human Score:</span>
+                            <span className={`ml-2 px-2 py-1 rounded text-xs ${
+                              selectedTrace.humanScore === 'good' ? 'bg-green-100 text-green-800' :
+                              selectedTrace.humanScore === 'bad' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {selectedTrace.humanScore || 'pending'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-700 font-medium">Status:</span>
+                            <span className={`ml-2 px-2 py-1 rounded text-xs ${
+                              selectedTrace.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                              selectedTrace.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {selectedTrace.status}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-700 font-medium">Data Source:</span>
+                            <span className="ml-2 text-gray-800">{selectedTrace.dataSource}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Evaluation Controls - Always visible at bottom */}
+                  <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg mt-6">
+                    {/* Evaluation Feedback */}
+                    {evaluationFeedback && (
+                      <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg mb-4 text-sm">
+                        ✓ {evaluationFeedback}
+                      </div>
+                    )}
+                    
                     <h4 className="text-sm font-medium text-gray-900 mb-3">Human Evaluation</h4>
                     <div className="flex gap-3">
-                      <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                      <button 
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        onClick={() => handleEvaluation('accept')}
+                      >
                         <CheckCircle className="w-4 h-4" />
                         Accept
                       </button>
-                      <button className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                      <button 
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                        onClick={() => handleEvaluation('reject')}
+                      >
                         <XCircle className="w-4 h-4" />
                         Reject
                       </button>
-                      <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                      <button 
+                        className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                        onClick={() => handleEvaluation('review')}
+                      >
                         <Clock className="w-4 h-4" />
                         Mark for Review
                       </button>
@@ -691,6 +1075,8 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500"
                         rows={2}
                         placeholder="Add notes about your evaluation..."
+                        value={evaluationNotes}
+                        onChange={(e) => setEvaluationNotes(e.target.value)}
                       />
                     </div>
                   </div>
@@ -726,6 +1112,17 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
             </div>
 
             <div className="space-y-4">
+              {/* Instructions */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <h4 className="text-sm font-medium text-blue-900 mb-1">Upload Instructions</h4>
+                <ul className="text-xs text-blue-800 space-y-1">
+                  <li>• Upload JSON files with trace data (CSV support coming soon)</li>
+                  <li>• Each trace should include: userInput, aiResponse, model info</li>
+                  <li>• <span className="font-medium">Try the sample file:</span> <code className="bg-blue-100 px-1 rounded">sample_traces.json</code> in the project root</li>
+                  <li>• Maximum file size: 10MB</li>
+                </ul>
+              </div>
+
               {/* File Upload Area */}
               <div 
                 className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
@@ -801,6 +1198,59 @@ trace-003,2025-01-20T08:33:18Z,Market-Analysis,Price-Trends,"Price trend?","Pric
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isUploading ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection Modal */}
+      {showRejectionModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Reject Trace</h3>
+              <button
+                onClick={() => setShowRejectionModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Why are you rejecting this trace?
+                </label>
+                <div className="space-y-2">
+                  {[
+                    'Inaccurate response',
+                    'Irrelevant to query',
+                    'Poor quality',
+                    'Hallucinated information',
+                    'Inappropriate content',
+                    'Technical error',
+                    'Other'
+                  ].map((reason) => (
+                    <button
+                      key={reason}
+                      onClick={() => handleRejectionSubmit(reason)}
+                      className="w-full text-left px-3 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowRejectionModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.security import get_current_user_email
 from database.connection import get_db
 from services.trace_logger import trace_logger
+from services.cache_service import cache_response, cache_service
 
 
 router = APIRouter()
@@ -94,6 +95,12 @@ async def create_trace(
             cost_usd=trace_data.cost_usd,
         )
         
+        # Invalidate related caches when new trace is created
+        cache_service.delete_pattern("traces:list:*")
+        cache_service.delete_pattern("traces:stats:*")
+        if trace_data.session_id:
+            cache_service.delete_pattern(f"traces:session:{trace_data.session_id}:*")
+        
         return {"trace_id": str(trace_id), "message": "Trace created successfully"}
     
     except Exception as e:
@@ -104,6 +111,7 @@ async def create_trace(
 
 
 @router.get("/traces", response_model=List[TraceResponse])
+@cache_response("traces:list", ttl_key="trace_stats", include_user=True, vary_on=["limit", "offset", "model_name", "session_id"])
 async def get_traces(
     limit: int = Query(100, ge=1, le=1000, description="Number of traces to return"),
     offset: int = Query(0, ge=0, description="Number of traces to skip"),
@@ -136,6 +144,7 @@ async def get_traces(
 
 
 @router.get("/traces/{trace_id}", response_model=TraceResponse)
+@cache_response("traces:detail", ttl=3600, vary_on=["trace_id"])  # Cache individual traces for 1 hour
 async def get_trace(
     trace_id: str,
     current_user_email: str = Depends(get_current_user_email),
@@ -171,6 +180,7 @@ async def get_trace(
 
 
 @router.post("/traces/search", response_model=List[TraceResponse])
+@cache_response("traces:search", ttl_key="trace_stats", include_user=True)
 async def search_traces(
     filters: TraceFilters,
     limit: int = Query(100, ge=1, le=1000, description="Number of traces to return"),
@@ -217,6 +227,9 @@ async def sync_langsmith_traces(
     try:
         synced_count = await trace_logger.sync_from_langsmith(project_name)
         
+        # Invalidate caches after sync since new data was added
+        cache_service.delete_pattern("traces:*")
+        
         return {
             "message": f"Successfully synced {synced_count} traces from LangSmith",
             "synced_count": synced_count,
@@ -236,6 +249,7 @@ async def sync_langsmith_traces(
 
 
 @router.get("/traces/stats/summary", response_model=Dict[str, Any])
+@cache_response("traces:stats", ttl_key="trace_stats", include_user=True)  # Cache stats for 5 minutes
 async def get_trace_stats(
     current_user_email: str = Depends(get_current_user_email),
     db: AsyncSession = Depends(get_db)
