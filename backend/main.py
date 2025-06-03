@@ -47,6 +47,7 @@ from api.cache import router as cache_router
 from api.analytics import router as analytics_router
 from api.langsmith import router as langsmith_router
 from api.llm_providers import router as llm_providers_router
+from api.slack import router as slack_router
 
 # Configure logging
 logging.basicConfig(
@@ -133,6 +134,7 @@ app = FastAPI(
         {"name": "Performance", "description": "System performance monitoring"},
         {"name": "LangSmith Integration", "description": "Enhanced LangSmith integration and synchronization"},
         {"name": "LLM Providers", "description": "OpenAI, Anthropic, and other LLM provider integrations"},
+        {"name": "Slack Integration", "description": "Slack notifications and integration"},
     ]
 )
 
@@ -174,6 +176,7 @@ app.include_router(cache_router, prefix=API_V1_PREFIX)
 app.include_router(analytics_router, prefix=API_V1_PREFIX)
 app.include_router(langsmith_router, prefix=API_V1_PREFIX)
 app.include_router(llm_providers_router, prefix=API_V1_PREFIX)
+app.include_router(slack_router, prefix=API_V1_PREFIX)
 
 # Root endpoint
 @app.get("/")
@@ -191,7 +194,8 @@ async def root():
             "real_time": "WebSocket streaming for live updates",
             "multi_tenancy": "Team-based data isolation",
             "langsmith_integration": "Enhanced LangSmith sync and webhook support",
-            "llm_providers": "OpenAI, Anthropic provider management with hooks"
+            "llm_providers": "OpenAI, Anthropic provider management with hooks",
+            "slack_integration": "Slack notifications and integration"
         },
         "endpoints": {
             "docs": "/docs",
@@ -202,7 +206,8 @@ async def root():
             "evaluations": f"{API_V1_PREFIX}/evaluations",
             "experiments": f"{API_V1_PREFIX}/experiments",
             "langsmith": f"{API_V1_PREFIX}/langsmith",
-            "llm_providers": f"{API_V1_PREFIX}/llm-providers"
+            "llm_providers": f"{API_V1_PREFIX}/llm-providers",
+            "slack": f"{API_V1_PREFIX}/slack"
         }
     }
 
