@@ -20,6 +20,7 @@ from api.large_dataset_handler import router as large_dataset_router
 from api.experiments import router as experiments_router
 from api.webhooks import router as webhooks_router
 from api.streaming import router as streaming_router
+from api.auth import router as auth_router
 
 # Performance middleware
 from middleware.performance import (
@@ -178,6 +179,7 @@ app.include_router(large_dataset_router, prefix="/api/large_dataset_handler", ta
 app.include_router(experiments_router, prefix="/api/experiments", tags=["Experiments"])
 app.include_router(webhooks_router, tags=["Webhooks", "Real-time Data Pipeline"])
 app.include_router(streaming_router, tags=["Streaming", "Real-time Updates"])
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 
 # Future routers (will be added as we build more features)
 # app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
