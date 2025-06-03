@@ -20,7 +20,7 @@ from .performance import (
     query_optimizer,
     query_cache
 )
-from services.cache_service import cache_service
+from services.cache_service import cache_service, trace_cache, evaluation_cache
 from config.performance import CACHE_TTL_SETTINGS, RESPONSE_SIZE_LIMITS
 
 logger = logging.getLogger(__name__)
@@ -260,15 +260,8 @@ class TraceRepository(BaseRepository):
     
     async def _invalidate_trace_caches(self, team_id: str):
         """Invalidate trace-related cache entries."""
-        cache_patterns = [
-            f"query_cache:*team_id*{team_id}*",
-            f"trace_stats:{team_id}:*",
-            f"dashboard_analytics:{team_id}:*"
-        ]
-        
-        if cache_service.is_available():
-            for pattern in cache_patterns:
-                cache_service.delete_pattern(pattern)
+        # Use the enhanced cache service with Redis backend
+        await trace_cache.invalidate_team_cache(team_id)
 
 
 class EvaluationRepository(BaseRepository):
@@ -335,15 +328,13 @@ class EvaluationRepository(BaseRepository):
     
     async def _invalidate_evaluation_caches(self, team_id: str):
         """Invalidate evaluation-related cache entries."""
+        # Use the enhanced cache service with Redis backend
         cache_patterns = [
-            f"evaluation_summaries:{team_id}:*",
-            f"trace_stats:{team_id}:*",
-            f"dashboard_analytics:{team_id}:*"
+            f"*{team_id}*"
         ]
         
-        if cache_service.is_available():
-            for pattern in cache_patterns:
-                cache_service.delete_pattern(pattern)
+        for pattern in cache_patterns:
+            await cache_service.delete_pattern(pattern, prefix="evaluation")
 
 
 class ExperimentRepository(BaseRepository):

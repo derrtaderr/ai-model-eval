@@ -15,32 +15,47 @@ DATABASE_POOL_SETTINGS = {
     "pool_pre_ping": True,  # Verify connections before use
 }
 
-# Redis Cache Settings
+# Redis Cache Configuration
 REDIS_CACHE_SETTINGS = {
     "host": os.getenv("REDIS_HOST", "localhost"),
-    "port": int(os.getenv("REDIS_PORT", "6379")),
-    "db": int(os.getenv("REDIS_CACHE_DB", "0")),
-    "password": os.getenv("REDIS_PASSWORD", None),
+    "port": int(os.getenv("REDIS_PORT", 6379)),
+    "db": int(os.getenv("REDIS_DB", 0)),
+    "password": os.getenv("REDIS_PASSWORD"),
     "encoding": "utf-8",
-    "decode_responses": True,
-    "max_connections": int(os.getenv("REDIS_MAX_CONNECTIONS", "20")),
-    "socket_timeout": int(os.getenv("REDIS_SOCKET_TIMEOUT", "5")),
-    "connection_pool_kwargs": {
-        "retry_on_timeout": True,
-        "health_check_interval": 30,
-    }
+    "decode_responses": False,  # We handle our own serialization
+    "max_connections": int(os.getenv("REDIS_MAX_CONNECTIONS", 20)),
+    "socket_timeout": float(os.getenv("REDIS_SOCKET_TIMEOUT", 5.0)),
+    "socket_connect_timeout": float(os.getenv("REDIS_CONNECT_TIMEOUT", 5.0)),
+    "retry_on_timeout": True,
+    "health_check_interval": 30
 }
 
-# Cache TTL Settings (in seconds)
+# Cache TTL (Time To Live) Settings in seconds
 CACHE_TTL_SETTINGS = {
-    "trace_stats": 300,      # 5 minutes
-    "user_sessions": 1800,   # 30 minutes
-    "experiment_results": 600,  # 10 minutes
-    "evaluation_summaries": 900,  # 15 minutes
-    "test_run_results": 300,  # 5 minutes
-    "model_configs": 3600,   # 1 hour
-    "filter_presets": 1800,  # 30 minutes
-    "dashboard_analytics": 120,  # 2 minutes
+    "trace_stats": int(os.getenv("CACHE_TTL_TRACE_STATS", 300)),      # 5 minutes
+    "evaluation_summaries": int(os.getenv("CACHE_TTL_EVAL_SUMMARIES", 600)),  # 10 minutes
+    "experiment_results": int(os.getenv("CACHE_TTL_EXPERIMENT_RESULTS", 1800)),  # 30 minutes
+    "dashboard_analytics": int(os.getenv("CACHE_TTL_DASHBOARD", 180)),   # 3 minutes
+    "user_sessions": int(os.getenv("CACHE_TTL_USER_SESSIONS", 3600)),    # 1 hour
+    "api_responses": int(os.getenv("CACHE_TTL_API_RESPONSES", 120)),     # 2 minutes
+    "search_results": int(os.getenv("CACHE_TTL_SEARCH", 900)),          # 15 minutes
+    "static_data": int(os.getenv("CACHE_TTL_STATIC", 7200)),            # 2 hours
+    "temporary": int(os.getenv("CACHE_TTL_TEMP", 60)),                  # 1 minute
+    "long_term": int(os.getenv("CACHE_TTL_LONG_TERM", 86400))           # 24 hours
+}
+
+# Cache key prefixes for organization
+CACHE_KEY_PREFIXES = {
+    "trace": "trace",
+    "evaluation": "eval", 
+    "experiment": "exp",
+    "user": "user",
+    "session": "sess",
+    "dashboard": "dash",
+    "api": "api",
+    "search": "search",
+    "temp": "temp",
+    "system": "sys"
 }
 
 # Performance Monitoring Settings

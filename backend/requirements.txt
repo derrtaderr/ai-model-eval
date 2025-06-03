@@ -1,0 +1,3 @@
+# Redis Caching
+redis>=5.0.0
+redis[hiredis]>=5.0.0  # Redis with hiredis for better performance 

@@ -23,6 +23,10 @@ from database.performance import (
     analyze_table_statistics
 )
 
+# Import cache service
+from services.cache_service import cache_service
+from services.redis_service import warm_up_cache
+
 # Import middleware
 from middleware.performance import (
     PerformanceMonitoringMiddleware,
@@ -38,7 +42,8 @@ from api.auth import router as auth_router
 from api.external import router as external_router
 from api.webhooks import router as webhooks_router
 from api.streaming import router as streaming_router
-from api.performance import router as performance_router  # New performance API
+from api.performance import router as performance_router
+from api.cache import router as cache_router  # New cache API
 
 # Configure logging
 logging.basicConfig(
@@ -53,7 +58,7 @@ performance_config = get_performance_config()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Application lifespan management with database optimization.
+    Application lifespan management with database optimization and cache initialization.
     """
     logger.info("Starting LLM Evaluation Platform backend...")
     
@@ -61,6 +66,14 @@ async def lifespan(app: FastAPI):
         # Initialize database with optimizations
         await create_tables()
         logger.info("Database tables created/verified")
+        
+        # Initialize cache service
+        await cache_service.initialize()
+        logger.info("Cache service initialized")
+        
+        # Warm up cache with frequently accessed data
+        await warm_up_cache()
+        logger.info("Cache warm-up completed")
         
         # Setup connection pool monitoring
         if hasattr(engine, 'pool'):
@@ -90,8 +103,13 @@ async def lifespan(app: FastAPI):
     
     # Cleanup
     logger.info("Application shutting down")
+    
+    # Close cache connections
+    if hasattr(cache_service, 'redis_service'):
+        await cache_service.redis_service.close()
+    
     await engine.dispose()
-    logger.info("Database connections closed")
+    logger.info("Database and cache connections closed")
 
 # Create FastAPI application with lifespan management
 app = FastAPI(
@@ -146,7 +164,8 @@ app.include_router(experiments_router, prefix=API_V1_PREFIX)
 app.include_router(external_router, prefix="/api/external")
 app.include_router(webhooks_router, prefix=API_V1_PREFIX)
 app.include_router(streaming_router, prefix=API_V1_PREFIX)
-app.include_router(performance_router, prefix=API_V1_PREFIX)  # New performance API
+app.include_router(performance_router, prefix=API_V1_PREFIX)
+app.include_router(cache_router, prefix=API_V1_PREFIX)  # New cache API
 
 # Root endpoint
 @app.get("/")
