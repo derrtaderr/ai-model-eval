@@ -132,7 +132,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self.request_counts = defaultdict(lambda: defaultdict(int))
-        self.last_reset = defaultdict(lambda: defaultdict(datetime))
+        self.last_reset = defaultdict(lambda: defaultdict(datetime.utcnow))
     
     async def dispatch(self, request: Request, call_next):
         """Apply rate limiting based on client IP and endpoint."""

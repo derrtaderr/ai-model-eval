@@ -19,36 +19,61 @@ logger = logging.getLogger(__name__)
 # Database configuration
 DATABASE_URL = config(
     "DATABASE_URL",
-    default="postgresql+asyncpg://user:password@localhost:5432/llm_eval_platform"
+    default="sqlite+aiosqlite:///./dev_database.db"
 )
 
-# Create async engine with optimized settings
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=config("DATABASE_ECHO", default=False, cast=bool),
-    
-    # Connection pool optimization
-    pool_size=DATABASE_POOL_SETTINGS["pool_size"],
-    max_overflow=DATABASE_POOL_SETTINGS["max_overflow"],
-    pool_timeout=DATABASE_POOL_SETTINGS["pool_timeout"],
-    pool_recycle=DATABASE_POOL_SETTINGS["pool_recycle"],
-    pool_pre_ping=DATABASE_POOL_SETTINGS["pool_pre_ping"],
-    
-    # Performance optimizations
-    poolclass=QueuePool,
-    
-    # Connection parameters for PostgreSQL optimization
-    connect_args={
+# Determine database type for connection configuration
+is_sqlite = DATABASE_URL.startswith("sqlite")
+is_postgres = DATABASE_URL.startswith("postgresql")
+
+# Configure connection arguments based on database type
+if is_postgres:
+    connect_args = {
         "command_timeout": 30,
         "server_settings": {
             "application_name": "llm_eval_platform",
             "jit": "off",  # Disable JIT for faster simple queries
         },
-    },
-    
-    # Query optimization
-    future=True,  # Use SQLAlchemy 2.0 style
-)
+    }
+    pool_class = QueuePool
+elif is_sqlite:
+    connect_args = {
+        "check_same_thread": False,  # Allow SQLite to be used across threads
+    }
+    pool_class = None  # SQLite doesn't need connection pooling
+else:
+    connect_args = {}
+    pool_class = QueuePool
+
+# Create async engine with optimized settings
+if is_sqlite:
+    # Simplified configuration for SQLite
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=config("DATABASE_ECHO", default=False, cast=bool),
+        connect_args=connect_args,
+        future=True,  # Use SQLAlchemy 2.0 style
+    )
+else:
+    # Full configuration for PostgreSQL
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=config("DATABASE_ECHO", default=False, cast=bool),
+        
+        # Connection pool optimization
+        pool_size=DATABASE_POOL_SETTINGS["pool_size"],
+        max_overflow=DATABASE_POOL_SETTINGS["max_overflow"],
+        pool_timeout=DATABASE_POOL_SETTINGS["pool_timeout"],
+        pool_recycle=DATABASE_POOL_SETTINGS["pool_recycle"],
+        pool_pre_ping=DATABASE_POOL_SETTINGS["pool_pre_ping"],
+        
+        # Performance optimizations
+        poolclass=pool_class,
+        connect_args=connect_args,
+        
+        # Query optimization
+        future=True,  # Use SQLAlchemy 2.0 style
+    )
 
 # Create async session factory
 AsyncSessionLocal = sessionmaker(
