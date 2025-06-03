@@ -46,6 +46,7 @@ from api.performance import router as performance_router
 from api.cache import router as cache_router
 from api.analytics import router as analytics_router
 from api.langsmith import router as langsmith_router
+from api.llm_providers import router as llm_providers_router
 
 # Configure logging
 logging.basicConfig(
@@ -131,6 +132,7 @@ app = FastAPI(
         {"name": "Streaming", "description": "Real-time data streaming"},
         {"name": "Performance", "description": "System performance monitoring"},
         {"name": "LangSmith Integration", "description": "Enhanced LangSmith integration and synchronization"},
+        {"name": "LLM Providers", "description": "OpenAI, Anthropic, and other LLM provider integrations"},
     ]
 )
 
@@ -171,6 +173,7 @@ app.include_router(performance_router, prefix=API_V1_PREFIX)
 app.include_router(cache_router, prefix=API_V1_PREFIX)
 app.include_router(analytics_router, prefix=API_V1_PREFIX)
 app.include_router(langsmith_router, prefix=API_V1_PREFIX)
+app.include_router(llm_providers_router, prefix=API_V1_PREFIX)
 
 # Root endpoint
 @app.get("/")
@@ -187,7 +190,8 @@ async def root():
             "rate_limiting": "Configurable per-endpoint limits",
             "real_time": "WebSocket streaming for live updates",
             "multi_tenancy": "Team-based data isolation",
-            "langsmith_integration": "Enhanced LangSmith sync and webhook support"
+            "langsmith_integration": "Enhanced LangSmith sync and webhook support",
+            "llm_providers": "OpenAI, Anthropic provider management with hooks"
         },
         "endpoints": {
             "docs": "/docs",
@@ -197,7 +201,8 @@ async def root():
             "traces": f"{API_V1_PREFIX}/traces",
             "evaluations": f"{API_V1_PREFIX}/evaluations",
             "experiments": f"{API_V1_PREFIX}/experiments",
-            "langsmith": f"{API_V1_PREFIX}/langsmith"
+            "langsmith": f"{API_V1_PREFIX}/langsmith",
+            "llm_providers": f"{API_V1_PREFIX}/llm-providers"
         }
     }
 
