@@ -308,4 +308,18 @@ class FilterPreset(Base):
         Index('idx_filter_preset_public', 'is_public'),
         Index('idx_filter_preset_user_default', 'user_id', 'is_default'),
         Index('idx_filter_preset_team_public', 'team_id', 'is_public'),  # New composite index
-    ) 
+    )
+
+
+# Import comprehensive A/B testing models (these will replace the basic Experiment model above)
+try:
+    from experiments.models import (
+        Experiment as ABExperiment,
+        ExperimentVariant,
+        ParticipantAssignment, 
+        ExperimentEvent,
+        ExperimentResult
+    )
+except ImportError:
+    # Models not yet available during initial setup
+    pass 

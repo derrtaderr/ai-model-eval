@@ -45,6 +45,7 @@ from api.streaming import router as streaming_router
 from api.performance import router as performance_router
 from api.cache import router as cache_router
 from api.analytics import router as analytics_router
+from api.langsmith import router as langsmith_router
 
 # Configure logging
 logging.basicConfig(
@@ -129,6 +130,7 @@ app = FastAPI(
         {"name": "Webhooks", "description": "Webhook management and processing"},
         {"name": "Streaming", "description": "Real-time data streaming"},
         {"name": "Performance", "description": "System performance monitoring"},
+        {"name": "LangSmith Integration", "description": "Enhanced LangSmith integration and synchronization"},
     ]
 )
 
@@ -168,6 +170,7 @@ app.include_router(streaming_router, prefix=API_V1_PREFIX)
 app.include_router(performance_router, prefix=API_V1_PREFIX)
 app.include_router(cache_router, prefix=API_V1_PREFIX)
 app.include_router(analytics_router, prefix=API_V1_PREFIX)
+app.include_router(langsmith_router, prefix=API_V1_PREFIX)
 
 # Root endpoint
 @app.get("/")
@@ -183,7 +186,8 @@ async def root():
             "caching": "Intelligent query result caching",
             "rate_limiting": "Configurable per-endpoint limits",
             "real_time": "WebSocket streaming for live updates",
-            "multi_tenancy": "Team-based data isolation"
+            "multi_tenancy": "Team-based data isolation",
+            "langsmith_integration": "Enhanced LangSmith sync and webhook support"
         },
         "endpoints": {
             "docs": "/docs",
@@ -192,7 +196,8 @@ async def root():
             "auth": f"{API_V1_PREFIX}/auth",
             "traces": f"{API_V1_PREFIX}/traces",
             "evaluations": f"{API_V1_PREFIX}/evaluations",
-            "experiments": f"{API_V1_PREFIX}/experiments"
+            "experiments": f"{API_V1_PREFIX}/experiments",
+            "langsmith": f"{API_V1_PREFIX}/langsmith"
         }
     }
 
