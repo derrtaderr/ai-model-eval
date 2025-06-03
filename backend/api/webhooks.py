@@ -8,9 +8,9 @@ import hmac
 import time
 from datetime import datetime
 
-from ..database.connection import get_db_connection
-from ..services.cache_service import cache_service
-from ..models.trace import Trace
+from database.connection import get_db
+from services.cache_service import cache_service
+from database.models import Trace
 
 router = APIRouter()
 
@@ -119,7 +119,7 @@ async def receive_trace_webhook(
     background_tasks: BackgroundTasks,
     request: Request,
     signature_valid: bool = Depends(verify_webhook_signature),
-    db_connection = Depends(get_db_connection)
+    db_connection = Depends(get_db)
 ):
     """Receive a single trace via webhook"""
     if not signature_valid:
@@ -144,7 +144,7 @@ async def receive_batch_webhook(
     background_tasks: BackgroundTasks,
     request: Request,
     signature_valid: bool = Depends(verify_webhook_signature),
-    db_connection = Depends(get_db_connection)
+    db_connection = Depends(get_db)
 ):
     """Receive multiple traces via webhook batch"""
     if not signature_valid:
@@ -185,7 +185,7 @@ async def webhook_health():
     }
 
 @router.get("/webhook/stats")
-async def webhook_stats(db_connection = Depends(get_db_connection)):
+async def webhook_stats(db_connection = Depends(get_db)):
     """Get webhook processing statistics"""
     try:
         cursor = db_connection.cursor()

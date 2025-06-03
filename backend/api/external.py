@@ -177,6 +177,8 @@ def check_rate_limit(api_key: APIKey, request: Request) -> bool:
 
 def log_api_usage(api_key: APIKey, request: Request, response_time: float, status_code: int):
     """Log API usage for analytics and rate limiting."""
+    global API_USAGE
+    
     usage = {
         "api_key_id": api_key.id,
         "endpoint": str(request.url.path),
@@ -192,7 +194,6 @@ def log_api_usage(api_key: APIKey, request: Request, response_time: float, statu
     
     # Keep only last 24 hours of usage data
     day_ago = datetime.utcnow() - timedelta(days=1)
-    global API_USAGE
     API_USAGE = [u for u in API_USAGE if u["timestamp"] > day_ago]
 
 

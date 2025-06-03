@@ -126,7 +126,7 @@ class APIKey(Base):
 class TeamCreate(BaseModel):
     """Schema for creating a new team."""
     name: str = Field(..., min_length=2, max_length=255)
-    slug: str = Field(..., min_length=2, max_length=100, regex=r'^[a-z0-9-]+$')
+    slug: str = Field(..., min_length=2, max_length=100, pattern=r'^[a-z0-9-]+$')
     description: Optional[str] = Field(None, max_length=1000)
     
     @validator('slug')
@@ -162,7 +162,7 @@ class UserTeamRole(BaseModel):
 
 class TeamInvitationCreate(BaseModel):
     """Schema for creating team invitations."""
-    email: str = Field(..., regex=r'^[^@]+@[^@]+\.[^@]+$')
+    email: str = Field(..., pattern=r'^[^@]+@[^@]+\.[^@]+$')
     role: UserRole = Field(default=UserRole.VIEWER)
 
 

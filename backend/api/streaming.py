@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime
 
-from ..database.connection import get_db_connection
-from ..services.cache_service import cache_service
+from database.connection import get_db
+from services.cache_service import cache_service
 
 router = APIRouter()
 
@@ -164,7 +165,7 @@ async def stream_traces(
     async def trace_stream():
         try:
             # Send initial recent traces
-            db_connection = next(get_db_connection())
+            db_connection = next(get_db())
             cursor = db_connection.cursor()
             
             cursor.execute("""
@@ -239,7 +240,7 @@ async def stream_metrics(
                 # Update metrics every interval
                 if current_time - last_update >= interval:
                     try:
-                        db_connection = next(get_db_connection())
+                        db_connection = next(get_db())
                         cursor = db_connection.cursor()
                         
                         # Get current metrics

@@ -1,16 +1,18 @@
 """
 Performance monitoring middleware for the LLM Evaluation Platform.
-Tracks response times, database performance, and implements rate limiting.
+Tracks request metrics, response times, and system performance.
 """
 
 import time
 import logging
-from typing import Dict, Any, Optional
+import asyncio
+import psutil
+from typing import Callable, Dict, Any, Optional
 from datetime import datetime, timedelta
-from collections import defaultdict
+from collections import defaultdict, deque
 
-from fastapi import Request, Response, HTTPException
-from fastapi.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import Request, Response
 from starlette.responses import JSONResponse
 
 from config.performance import MONITORING_SETTINGS, RATE_LIMIT_SETTINGS
