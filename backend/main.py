@@ -18,6 +18,8 @@ from api.integrations import router as integrations_router
 from api.external import router as external_router
 from api.large_dataset_handler import router as large_dataset_router
 from api.experiments import router as experiments_router
+from api.webhooks import router as webhooks_router
+from api.streaming import router as streaming_router
 
 # Performance middleware
 from middleware.performance import (
@@ -174,10 +176,11 @@ app.include_router(integrations_router, prefix="/api/integrations", tags=["Integ
 app.include_router(external_router, prefix="/api/external", tags=["External Integration API"])
 app.include_router(large_dataset_router, prefix="/api/large_dataset_handler", tags=["Large Dataset Handler"])
 app.include_router(experiments_router, prefix="/api/experiments", tags=["Experiments"])
+app.include_router(webhooks_router, tags=["Webhooks", "Real-time Data Pipeline"])
+app.include_router(streaming_router, tags=["Streaming", "Real-time Updates"])
 
 # Future routers (will be added as we build more features)
 # app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-# app.include_router(experiments_router, prefix="/api", tags=["Experiments"])
 
 
 if __name__ == "__main__":

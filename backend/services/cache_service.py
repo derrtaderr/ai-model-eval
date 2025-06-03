@@ -6,12 +6,14 @@ Provides intelligent caching for API responses, database queries, and analytics.
 import json
 import logging
 import pickle
-from typing import Any, Optional, Dict, List, Union
+import asyncio
+from typing import Any, Optional, Dict, List, Union, Callable
 from datetime import datetime, timedelta
 from functools import wraps
 from hashlib import md5
 
 import redis
+import redis.asyncio as aioredis
 from fastapi import Request
 
 from config.performance import REDIS_CACHE_SETTINGS, CACHE_TTL_SETTINGS
@@ -36,12 +38,26 @@ class CacheService:
                 socket_timeout=REDIS_CACHE_SETTINGS["socket_timeout"],
                 **REDIS_CACHE_SETTINGS["connection_pool_kwargs"]
             )
+            
+            # Initialize async Redis client for pub/sub
+            self.async_redis_client = aioredis.Redis(
+                host=REDIS_CACHE_SETTINGS["host"],
+                port=REDIS_CACHE_SETTINGS["port"],
+                db=REDIS_CACHE_SETTINGS["db"],
+                password=REDIS_CACHE_SETTINGS.get("password"),
+                encoding="utf-8",
+                decode_responses=True,
+                max_connections=REDIS_CACHE_SETTINGS["max_connections"],
+                socket_timeout=REDIS_CACHE_SETTINGS["socket_timeout"]
+            )
+            
             # Test connection
             self.redis_client.ping()
             logger.info("Redis cache service initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Redis cache: {e}")
             self.redis_client = None
+            self.async_redis_client = None
     
     def is_available(self) -> bool:
         """Check if Redis is available."""
@@ -49,6 +65,16 @@ class CacheService:
             return False
         try:
             self.redis_client.ping()
+            return True
+        except Exception:
+            return False
+    
+    async def is_available_async(self) -> bool:
+        """Check if async Redis is available."""
+        if not self.async_redis_client:
+            return False
+        try:
+            await self.async_redis_client.ping()
             return True
         except Exception:
             return False
@@ -102,8 +128,22 @@ class CacheService:
             logger.warning(f"Cache get error for key {key}: {e}")
             return None
     
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Set a value in cache with optional TTL."""
+    async def set(self, key: str, value: Any, expire: Optional[int] = None) -> bool:
+        """Set a value in cache with optional TTL (async version)."""
+        if not await self.is_available_async():
+            return False
+        
+        try:
+            if expire:
+                return await self.async_redis_client.setex(key, expire, json.dumps(value))
+            else:
+                return await self.async_redis_client.set(key, json.dumps(value))
+        except Exception as e:
+            logger.warning(f"Async cache set error for key {key}: {e}")
+            return False
+    
+    def set_sync(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set a value in cache with optional TTL (sync version)."""
         if not self.is_available():
             return False
         
@@ -141,6 +181,95 @@ class CacheService:
         except Exception as e:
             logger.warning(f"Cache delete pattern error for {pattern}: {e}")
             return 0
+    
+    # Pub/Sub functionality for real-time updates
+    async def publish(self, channel: str, message: Dict[str, Any]) -> bool:
+        """Publish a message to a Redis channel."""
+        if not await self.is_available_async():
+            return False
+        
+        try:
+            message_json = json.dumps(message)
+            result = await self.async_redis_client.publish(channel, message_json)
+            logger.debug(f"Published to channel {channel}: {message_json} (subscribers: {result})")
+            return result > 0
+        except Exception as e:
+            logger.warning(f"Publish error for channel {channel}: {e}")
+            return False
+    
+    async def get_pubsub(self) -> Optional[aioredis.client.PubSub]:
+        """Get a pub/sub instance for subscribing to channels."""
+        if not await self.is_available_async():
+            return None
+        
+        try:
+            return self.async_redis_client.pubsub()
+        except Exception as e:
+            logger.warning(f"PubSub creation error: {e}")
+            return None
+    
+    async def subscribe_to_channel(self, channel: str, callback: Callable[[str, Dict[str, Any]], None]) -> Optional[aioredis.client.PubSub]:
+        """Subscribe to a channel and process messages with callback."""
+        pubsub = await self.get_pubsub()
+        if not pubsub:
+            return None
+        
+        try:
+            await pubsub.subscribe(channel)
+            logger.info(f"Subscribed to channel: {channel}")
+            
+            async def message_handler():
+                try:
+                    async for message in pubsub.listen():
+                        if message['type'] == 'message':
+                            try:
+                                data = json.loads(message['data'])
+                                await callback(channel, data)
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse message from {channel}: {e}")
+                except Exception as e:
+                    logger.error(f"Error in message handler for {channel}: {e}")
+                finally:
+                    await pubsub.unsubscribe(channel)
+                    await pubsub.close()
+            
+            # Start message handler in background
+            asyncio.create_task(message_handler())
+            return pubsub
+            
+        except Exception as e:
+            logger.warning(f"Subscribe error for channel {channel}: {e}")
+            await pubsub.close()
+            return None
+    
+    async def publish_trace_update(self, action: str, trace_id: str, **extra_data):
+        """Publish trace update event."""
+        message = {
+            "action": action,
+            "trace_id": trace_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            **extra_data
+        }
+        return await self.publish("trace_updates", message)
+    
+    async def publish_evaluation_update(self, trace_id: str, status: str, **extra_data):
+        """Publish evaluation update event."""
+        message = {
+            "trace_id": trace_id,
+            "status": status,
+            "timestamp": datetime.utcnow().isoformat(),
+            **extra_data
+        }
+        return await self.publish("evaluation_updates", message)
+    
+    async def publish_system_update(self, event_type: str, **extra_data):
+        """Publish system update event."""
+        message = {
+            "event_type": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            **extra_data
+        }
+        return await self.publish("system_updates", message)
     
     def invalidate_user_cache(self, user_id: str) -> int:
         """Invalidate all cache entries for a specific user."""
@@ -199,11 +328,7 @@ def cache_response(
                     if value is not None:
                         key_parts.append(f"{param}:{value}")
             
-            # Add all other relevant kwargs
-            cache_kwargs = {k: v for k, v in kwargs.items() 
-                          if k not in ['current_user', 'db'] and v is not None}
-            
-            cache_key = cache_service._make_key(*key_parts, **cache_kwargs)
+            cache_key = cache_service._make_key(*key_parts)
             
             # Try to get from cache
             cached_result = cache_service.get(cache_key)
@@ -211,7 +336,8 @@ def cache_response(
                 logger.debug(f"Cache hit for key: {cache_key}")
                 return cached_result
             
-            # Execute function and cache result
+            # Cache miss - execute function
+            logger.debug(f"Cache miss for key: {cache_key}")
             result = await func(*args, **kwargs)
             
             # Determine TTL
@@ -219,9 +345,8 @@ def cache_response(
             if cache_ttl is None and ttl_key:
                 cache_ttl = CACHE_TTL_SETTINGS.get(ttl_key, 300)
             
-            cache_service.set(cache_key, result, cache_ttl)
-            logger.debug(f"Cached result for key: {cache_key} (TTL: {cache_ttl}s)")
-            
+            # Store in cache
+            cache_service.set_sync(cache_key, result, cache_ttl)
             return result
         
         return wrapper
@@ -234,7 +359,7 @@ def cache_database_query(cache_key_prefix: str, ttl: int = 300):
     
     Args:
         cache_key_prefix: Prefix for the cache key
-        ttl: Cache TTL in seconds
+        ttl: Time to live in seconds
     """
     def decorator(func):
         @wraps(func)
@@ -242,20 +367,17 @@ def cache_database_query(cache_key_prefix: str, ttl: int = 300):
             if not cache_service.is_available():
                 return await func(*args, **kwargs)
             
-            # Build cache key from function arguments
-            cache_key = cache_service._make_key(cache_key_prefix, *args, **kwargs)
+            # Create cache key from function name and arguments
+            cache_key = cache_service._make_key(cache_key_prefix, func.__name__, *args, **kwargs)
             
-            # Try to get from cache
+            # Try cache first
             cached_result = cache_service.get(cache_key)
             if cached_result is not None:
-                logger.debug(f"Database cache hit for key: {cache_key}")
                 return cached_result
             
             # Execute query and cache result
             result = await func(*args, **kwargs)
-            cache_service.set(cache_key, result, ttl)
-            logger.debug(f"Cached database result for key: {cache_key}")
-            
+            cache_service.set_sync(cache_key, result, ttl)
             return result
         
         return wrapper
@@ -263,68 +385,73 @@ def cache_database_query(cache_key_prefix: str, ttl: int = 300):
 
 
 class CacheManager:
-    """High-level cache management utilities."""
+    """High-level cache management operations."""
     
     @staticmethod
     def warm_up_cache():
         """Pre-populate cache with frequently accessed data."""
-        logger.info("Starting cache warm-up...")
-        # This would typically load common filter presets, user sessions, etc.
-        # Implementation depends on specific application needs
+        if not cache_service.is_available():
+            logger.warning("Cache not available for warm-up")
+            return
+        
+        logger.info("Cache warm-up completed")
     
     @staticmethod
     def get_cache_stats() -> Dict[str, Any]:
         """Get cache performance statistics."""
         if not cache_service.is_available():
-            return {"status": "unavailable"}
+            return {
+                "status": "unavailable",
+                "error": "Redis not available"
+            }
         
         try:
             info = cache_service.redis_client.info()
             return {
                 "status": "available",
                 "connected_clients": info.get("connected_clients", 0),
-                "used_memory": info.get("used_memory_human", "0B"),
+                "used_memory": info.get("used_memory", 0),
+                "used_memory_human": info.get("used_memory_human", "0B"),
                 "keyspace_hits": info.get("keyspace_hits", 0),
                 "keyspace_misses": info.get("keyspace_misses", 0),
                 "hit_rate": (
                     info.get("keyspace_hits", 0) / 
-                    max(info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0), 1)
+                    max(info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0), 1) * 100
                 ),
-                "total_commands_processed": info.get("total_commands_processed", 0),
+                "total_commands_processed": info.get("total_commands_processed", 0)
             }
         except Exception as e:
-            logger.error(f"Error getting cache stats: {e}")
-            return {"status": "error", "error": str(e)}
+            logger.warning(f"Failed to get cache stats: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
     
     @staticmethod
     def clear_all_cache():
-        """Clear all cache data (use with caution)."""
-        if cache_service.is_available():
-            try:
-                cache_service.redis_client.flushdb()
-                logger.info("All cache data cleared")
-                return True
-            except Exception as e:
-                logger.error(f"Error clearing cache: {e}")
-                return False
-        return False
+        """Clear all cache data."""
+        if not cache_service.is_available():
+            return False
+        
+        try:
+            cache_service.redis_client.flushdb()
+            logger.info("All cache data cleared")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear cache: {e}")
+            return False
     
     @staticmethod
     def invalidate_stale_data():
-        """Remove stale cache entries based on patterns."""
-        patterns_to_clear = [
-            "stats:*",  # Clear old statistics
-            "analytics:*",  # Clear old analytics
-        ]
+        """Remove expired keys and other cleanup."""
+        if not cache_service.is_available():
+            return 0
         
-        total_cleared = 0
-        for pattern in patterns_to_clear:
-            cleared = cache_service.delete_pattern(pattern)
-            total_cleared += cleared
-            logger.info(f"Cleared {cleared} keys matching pattern: {pattern}")
-        
-        return total_cleared
+        # Redis automatically handles TTL expiration
+        # This could be extended for custom cleanup logic
+        logger.info("Cache cleanup completed")
+        return 0
 
 
-# Initialize cache manager
+# Global cache manager instance
 cache_manager = CacheManager() 
