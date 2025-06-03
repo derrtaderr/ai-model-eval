@@ -1,3 +1,9 @@
 # Redis Caching
 redis>=5.0.0
-redis[hiredis]>=5.0.0  # Redis with hiredis for better performance 
+redis[hiredis]>=5.0.0  # Redis with hiredis for better performance
+
+# Analytics and Scientific Computing
+numpy>=1.24.0  # Numerical computing for trend analysis
+scipy>=1.10.0  # Statistical analysis for trend detection
+celery>=5.3.0  # Background job processing
+celery[redis]>=5.3.0  # Celery with Redis broker support 

@@ -103,6 +103,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         await session.close()
 
 
+# Alias for compatibility
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """Alias for get_db for compatibility with analytics module."""
+    async for session in get_db():
+        yield session
+
+
 async def create_tables():
     """
     Create all database tables.

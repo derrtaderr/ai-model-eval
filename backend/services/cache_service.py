@@ -314,6 +314,73 @@ def cache_function_result(
     return cache_result(ttl=ttl, key_prefix=prefix)
 
 
+def cache_response(
+    cache_key: str,
+    ttl: Optional[int] = None,
+    ttl_key: Optional[str] = None,
+    include_user: bool = False,
+    vary_on: Optional[List[str]] = None
+):
+    """
+    Decorator for caching API response data.
+    
+    Args:
+        cache_key: Base cache key
+        ttl: Cache TTL in seconds
+        ttl_key: Key to lookup TTL from CACHE_TTL_SETTINGS
+        include_user: Include user ID in cache key
+        vary_on: List of request parameters to include in cache key
+    """
+    def decorator(func):
+        import functools
+        from fastapi import Request
+        
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract request object
+            request = None
+            for arg in args:
+                if isinstance(arg, Request):
+                    request = arg
+                    break
+            
+            # Build cache key
+            key_parts = [cache_key]
+            
+            if include_user and request:
+                # This would need actual user extraction logic
+                user_id = getattr(request.state, 'user_id', 'anonymous')
+                key_parts.append(f"user:{user_id}")
+            
+            if vary_on and request:
+                for param in vary_on:
+                    value = request.query_params.get(param, "")
+                    if value:
+                        key_parts.append(f"{param}:{value}")
+            
+            final_key = ":".join(key_parts)
+            
+            # Determine TTL
+            cache_ttl = ttl
+            if ttl_key and ttl_key in CACHE_TTL_SETTINGS:
+                cache_ttl = CACHE_TTL_SETTINGS[ttl_key]
+            cache_ttl = cache_ttl or CACHE_TTL_SETTINGS["api_responses"]
+            
+            # Try to get from cache
+            cached_result = await cache_service.get(final_key, prefix="api")
+            if cached_result is not None:
+                return cached_result
+            
+            # Execute function and cache result
+            result = await func(*args, **kwargs)
+            await cache_service.set(final_key, result, cache_ttl, prefix="api")
+            
+            return result
+        
+        return wrapper
+    return decorator
+
+
 # Specialized cache managers for different data types
 class TraceCacheManager:
     """Specialized cache manager for trace data."""
@@ -368,5 +435,6 @@ __all__ = [
     "cache_service", 
     "trace_cache", 
     "evaluation_cache",
-    "cache_function_result"
+    "cache_function_result",
+    "cache_response"
 ] 

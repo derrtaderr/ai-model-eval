@@ -71,14 +71,15 @@ MONITORING_SETTINGS = {
 
 # Background Job Settings
 BACKGROUND_JOB_SETTINGS = {
-    "max_workers": int(os.getenv("CELERY_MAX_WORKERS", "4")),
-    "task_time_limit": int(os.getenv("CELERY_TASK_TIME_LIMIT", "300")),  # 5 minutes
-    "task_soft_time_limit": int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "240")),  # 4 minutes
-    "worker_prefetch_multiplier": int(os.getenv("CELERY_PREFETCH_MULTIPLIER", "1")),
+    "worker_prefetch_multiplier": int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", 4)),
+    "task_time_limit": int(os.getenv("CELERY_TASK_TIME_LIMIT", 300)),  # 5 minutes
+    "task_soft_time_limit": int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", 240)),  # 4 minutes
     "task_routes": {
-        "evaluation.tasks.run_model_evaluation": {"queue": "evaluation"},
-        "analytics.tasks.generate_report": {"queue": "analytics"},
-        "export.tasks.export_data": {"queue": "export"},
+        'analytics.calculate_team_metrics': {'queue': 'analytics'},
+        'analytics.analyze_team_trends': {'queue': 'analytics'},
+        'analytics.process_alerts': {'queue': 'alerts'},
+        'analytics.cleanup_old_data': {'queue': 'maintenance'},
+        'analytics.generate_daily_reports': {'queue': 'reports'}
     }
 }
 

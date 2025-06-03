@@ -43,7 +43,8 @@ from api.external import router as external_router
 from api.webhooks import router as webhooks_router
 from api.streaming import router as streaming_router
 from api.performance import router as performance_router
-from api.cache import router as cache_router  # New cache API
+from api.cache import router as cache_router
+from api.analytics import router as analytics_router
 
 # Configure logging
 logging.basicConfig(
@@ -165,7 +166,8 @@ app.include_router(external_router, prefix="/api/external")
 app.include_router(webhooks_router, prefix=API_V1_PREFIX)
 app.include_router(streaming_router, prefix=API_V1_PREFIX)
 app.include_router(performance_router, prefix=API_V1_PREFIX)
-app.include_router(cache_router, prefix=API_V1_PREFIX)  # New cache API
+app.include_router(cache_router, prefix=API_V1_PREFIX)
+app.include_router(analytics_router, prefix=API_V1_PREFIX)
 
 # Root endpoint
 @app.get("/")

@@ -3,8 +3,8 @@ Application settings and configuration management.
 """
 
 import os
-from typing import Optional
-from dataclasses import dataclass
+from typing import Optional, List
+from dataclasses import dataclass, field
 from decouple import config
 
 
@@ -27,6 +27,13 @@ class Settings:
     # Application settings
     debug: bool = config("DEBUG", default=False, cast=bool)
     secret_key: str = config("SECRET_KEY", default="dev-secret-key-change-in-production")
+    
+    # CORS settings
+    ALLOWED_ORIGINS: List[str] = field(default_factory=lambda: config(
+        "ALLOWED_ORIGINS", 
+        default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001", 
+        cast=lambda v: [origin.strip() for origin in v.split(",")]
+    ))
     
     # Taxonomy builder settings
     taxonomy_cache_hours: int = config("TAXONOMY_CACHE_HOURS", default=24, cast=int)

@@ -410,6 +410,42 @@ async def get_current_user_email(
     return auth_context.email
 
 
+async def get_current_user(
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """Get current user object."""
+    try:
+        stmt = select(User).where(
+            and_(
+                User.id == auth_context.user_id,
+                User.is_active == True
+            )
+        )
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive"
+            )
+        
+        # Add team context to user for convenience
+        user.default_team_id = auth_context.team_id
+        user.current_team_role = auth_context.team_role
+        
+        return user
+        
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to retrieve user"
+        )
+
+
 # RBAC dependencies
 def require_role(required_role: UserRole):
     """Dependency to require specific role."""
